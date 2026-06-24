@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://cqn3xgkbqsvsl"]
+
+[ext_resource type="Script" path="res://scripts/world/layered_test_world.gd" id="1_a5mlb"]
+
+[node name="LayeredTestWorld" type="Node2D"]
+script = ExtResource("1_a5mlb")
