@@ -10,12 +10,24 @@ enum TileType {
 	ROCK
 }
 
-const TILE_SIZE: int = 32
-const WORLD_WIDTH: int = 32
-const WORLD_HEIGHT: int = 18
+const TILE_SIZE: int = 16
+const WORLD_WIDTH: int = 96
+const WORLD_HEIGHT: int = 54
 
 # Grid of tile types
 var tile_grid: Array = []
+
+# Tile durability tracking for partially dug tiles
+# tile_durability[Vector2i] = remaining durability
+var tile_durability: Dictionary = {}
+
+# Durability values for diggable tiles
+const DIRT_MAX_DURABILITY: int = 8
+const SURFACE_MAX_DURABILITY: int = 8
+
+# Resource output when tiles are cleared
+const DIRT_PILE_PER_DIRT_TILE: int = 5
+const DIRT_PILE_PER_SURFACE_TILE: int = 3
 
 # Cleared tiles remain cleared - no automatic regrowth in early development
 # Future ecology/weather systems may reclaim tunnels, but cleared soil remains cleared during core gameplay
@@ -46,32 +58,33 @@ func _initialize_layered_world() -> void:
 		tile_grid.append(row)
 	
 	# Create layered world structure
-	# Rows 0-3: AIR
-	for y in range(4):
+	# Rows 0-9: AIR (increased to account for larger world)
+	for y in range(10):
 		for x in range(WORLD_WIDTH):
 			tile_grid[y][x] = TileType.AIR
 	
-	# Row 4: SURFACE
+	# Row 10: SURFACE
 	for x in range(WORLD_WIDTH):
-		tile_grid[4][x] = TileType.SURFACE
+		tile_grid[10][x] = TileType.SURFACE
 	
-	# Rows 5-17: Mostly DIRT with some rocks and empty tunnel pocket
-	for y in range(5, WORLD_HEIGHT):
+	# Rows 11-53: Mostly DIRT with some rocks and empty tunnel pocket
+	for y in range(11, WORLD_HEIGHT):
 		for x in range(WORLD_WIDTH):
 			tile_grid[y][x] = TileType.DIRT
 	
-	# Add rocks at strategic locations
-	tile_grid[7][5] = TileType.ROCK
-	tile_grid[7][10] = TileType.ROCK
-	tile_grid[10][15] = TileType.ROCK
-	tile_grid[12][8] = TileType.ROCK
+	# Add rocks at strategic locations (spaced out across larger world)
+	tile_grid[15][20] = TileType.ROCK
+	tile_grid[15][50] = TileType.ROCK
+	tile_grid[25][30] = TileType.ROCK
+	tile_grid[35][15] = TileType.ROCK
+	tile_grid[40][60] = TileType.ROCK
 	
-	# Create initial empty tunnel pocket where worm starts (around position 500, 288)
-	# That's roughly grid position (15, 9)
-	var start_x: int = 15
-	var start_y: int = 9
-	for dy in range(-1, 2):
-		for dx in range(-1, 2):
+	# Create initial empty tunnel pocket where worm starts
+	# Scale worm start position to new world size
+	var start_x: int = 48
+	var start_y: int = 20
+	for dy in range(-2, 3):
+		for dx in range(-2, 3):
 			var x: int = start_x + dx
 			var y: int = start_y + dy
 			if x >= 0 and x < WORLD_WIDTH and y >= 0 and y < WORLD_HEIGHT:
@@ -122,26 +135,152 @@ func is_edible(grid_position: Vector2i) -> bool:
 	var tile_type: int = get_tile_type(grid_position)
 	return tile_type == TileType.DIRT or tile_type == TileType.SURFACE
 
-func try_eat_tile(grid_position: Vector2i) -> Dictionary:
+func try_dig_tile(grid_position: Vector2i) -> Dictionary:
+	"""
+	Attempt to dig a tile. Returns durability status and resource output.
+	"""
 	if not is_in_bounds(grid_position):
-		return {"success": false, "message": "Out of bounds.", "tile_type": TileType.AIR, "hunger_restore": 0}
+		return {
+			"success": false,
+			"cleared": false,
+			"message": "Out of bounds.",
+			"tile_type": TileType.AIR,
+			"resource_id": "",
+			"resource_amount": 0,
+			"dig_progress": 0,
+			"dig_required": 0
+		}
 	
 	var tile_type: int = get_tile_type(grid_position)
+	var current_durability: int = tile_durability.get(grid_position, 0)
 	
 	match tile_type:
 		TileType.EMPTY:
-			return {"success": false, "message": "Nothing to eat.", "tile_type": tile_type, "hunger_restore": 0}
+			return {
+				"success": false,
+				"cleared": false,
+				"message": "Nothing to dig.",
+				"tile_type": tile_type,
+				"resource_id": "",
+				"resource_amount": 0,
+				"dig_progress": 0,
+				"dig_required": 0
+			}
 		TileType.AIR:
-			return {"success": false, "message": "Nothing to eat.", "tile_type": tile_type, "hunger_restore": 0}
+			return {
+				"success": false,
+				"cleared": false,
+				"message": "Nothing to dig.",
+				"tile_type": tile_type,
+				"resource_id": "",
+				"resource_amount": 0,
+				"dig_progress": 0,
+				"dig_required": 0
+			}
 		TileType.ROCK:
-			return {"success": false, "message": "Too hard to eat.", "tile_type": tile_type, "hunger_restore": 0}
-		TileType.DIRT, TileType.SURFACE:
-			# Eat the tile - it stays cleared
-			tile_grid[grid_position.y][grid_position.x] = TileType.EMPTY
+			return {
+				"success": false,
+				"cleared": false,
+				"message": "Rock is too hard to dig.",
+				"tile_type": tile_type,
+				"resource_id": "",
+				"resource_amount": 0,
+				"dig_progress": 0,
+				"dig_required": 0
+			}
+		TileType.DIRT:
+			# First dig of this tile - initialize durability
+			if current_durability == 0:
+				current_durability = DIRT_MAX_DURABILITY
 			
-			return {"success": true, "message": "Ate dirt.", "tile_type": tile_type, "hunger_restore": 20}
+			# Apply one dig action
+			current_durability -= 1
+			tile_durability[grid_position] = current_durability
+			
+			# Check if tile is fully cleared
+			if current_durability <= 0:
+				# Tile is cleared
+				tile_grid[grid_position.y][grid_position.x] = TileType.EMPTY
+				tile_durability.erase(grid_position)
+				
+				return {
+					"success": true,
+					"cleared": true,
+					"message": "Cleared dirt tile!",
+					"tile_type": tile_type,
+					"resource_id": "dirt_pile",
+					"resource_amount": DIRT_PILE_PER_DIRT_TILE,
+					"dig_progress": DIRT_MAX_DURABILITY,
+					"dig_required": DIRT_MAX_DURABILITY
+				}
+			else:
+				# Tile is partially dug
+				return {
+					"success": true,
+					"cleared": false,
+					"message": "Digging dirt: %d / %d" % [DIRT_MAX_DURABILITY - current_durability, DIRT_MAX_DURABILITY],
+					"tile_type": tile_type,
+					"resource_id": "",
+					"resource_amount": 0,
+					"dig_progress": DIRT_MAX_DURABILITY - current_durability,
+					"dig_required": DIRT_MAX_DURABILITY
+				}
+		
+		TileType.SURFACE:
+			# First dig of this tile - initialize durability
+			if current_durability == 0:
+				current_durability = SURFACE_MAX_DURABILITY
+			
+			# Apply one dig action
+			current_durability -= 1
+			tile_durability[grid_position] = current_durability
+			
+			# Check if tile is fully cleared
+			if current_durability <= 0:
+				# Tile is cleared
+				tile_grid[grid_position.y][grid_position.x] = TileType.EMPTY
+				tile_durability.erase(grid_position)
+				
+				return {
+					"success": true,
+					"cleared": true,
+					"message": "Cleared surface tile!",
+					"tile_type": tile_type,
+					"resource_id": "dirt_pile",
+					"resource_amount": DIRT_PILE_PER_SURFACE_TILE,
+					"dig_progress": SURFACE_MAX_DURABILITY,
+					"dig_required": SURFACE_MAX_DURABILITY
+				}
+			else:
+				# Tile is partially dug
+				return {
+					"success": true,
+					"cleared": false,
+					"message": "Digging surface: %d / %d" % [SURFACE_MAX_DURABILITY - current_durability, SURFACE_MAX_DURABILITY],
+					"tile_type": tile_type,
+					"resource_id": "",
+					"resource_amount": 0,
+					"dig_progress": SURFACE_MAX_DURABILITY - current_durability,
+					"dig_required": SURFACE_MAX_DURABILITY
+				}
+		
 		_:
-			return {"success": false, "message": "Cannot eat.", "tile_type": tile_type, "hunger_restore": 0}
+			return {
+				"success": false,
+				"cleared": false,
+				"message": "Cannot dig.",
+				"tile_type": tile_type,
+				"resource_id": "",
+				"resource_amount": 0,
+				"dig_progress": 0,
+				"dig_required": 0
+			}
+
+func try_eat_tile(grid_position: Vector2i) -> Dictionary:
+	"""
+	Legacy function - kept for compatibility. Delegates to try_dig_tile.
+	"""
+	return try_dig_tile(grid_position)
 
 # Regrowth disabled - cleared tiles remain cleared
 # func _update_regrowth_timers(delta: float) -> void:

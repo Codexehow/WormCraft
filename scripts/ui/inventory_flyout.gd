@@ -1,4 +1,4 @@
-class_name StatusFlyout
+class_name InventoryFlyout
 extends CanvasLayer
 
 var worm_player: Node2D
@@ -12,8 +12,8 @@ func _ready() -> void:
 	
 	# Create panel
 	panel_container = PanelContainer.new()
-	panel_container.size = Vector2(320, 280)
-	panel_container.position = Vector2(-340, 10)  # Start off-screen to the left
+	panel_container.size = Vector2(280, 150)
+	panel_container.position = Vector2(-300, 10)  # Start off-screen to the right
 	
 	# Create stylebox for panel
 	var style: StyleBoxFlat = StyleBoxFlat.new()
@@ -34,7 +34,7 @@ func _ready() -> void:
 	label.text = "Initializing..."
 	label.add_theme_font_size_override("font_size", 14)
 	label.modulate = Color.WHITE
-	label.custom_minimum_size = Vector2(300, 250)
+	label.custom_minimum_size = Vector2(260, 120)
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD
 	panel_container.add_child(label)
 	
@@ -42,17 +42,14 @@ func _ready() -> void:
 	
 	# Connect to worm signals
 	if worm_player:
-		worm_player.hunger_changed.connect(_on_hunger_changed)
 		worm_player.inventory_changed.connect(_on_inventory_changed)
-		worm_player.worm_died.connect(_on_worm_died)
-		worm_player.tile_changed.connect(_on_tile_changed)
 	
 	# Force closed state on startup
 	_update_panel()
 
 func _process(_delta: float) -> void:
-	# Toggle status panel using the toggle_status input action (bound to Tab)
-	if Input.is_action_just_pressed("toggle_status"):
+	# Toggle inventory panel using the toggle_inventory input action (bound to I)
+	if Input.is_action_just_pressed("toggle_inventory"):
 		toggle_panel()
 	
 	if is_open:
@@ -61,52 +58,30 @@ func _process(_delta: float) -> void:
 func toggle_panel() -> void:
 	is_open = !is_open
 	if is_open:
-		print("Status panel opened.")
+		print("Inventory panel opened.")
 	else:
-		print("Status panel closed.")
+		print("Inventory panel closed.")
 
 func _update_panel() -> void:
 	if not worm_player:
 		label.text = "ERROR: Worm player not found!"
 		return
 	
-	var hunger_text: String = "%.0f / %.0f" % [worm_player.hunger, worm_player.max_hunger]
-	var status_text: String = worm_player.get_status_text()
-	var tile_type_text: String = worm_player.get_tile_type_name()
-	var facing_text: String = worm_player.get_facing_direction_name()
 	var dirt_pile: int = worm_player.get_inventory_count("dirt_pile")
 	
-	var panel_text: String = """STATUS
+	var panel_text: String = """INVENTORY
 
-Hunger: %s
-State: %s
-Current Tile: %s
-Facing: %s
-Dirt Dug: %d
 Dirt Pile: %d
-Last: %s
-""" % [hunger_text, status_text, tile_type_text, facing_text, worm_player.dirt_dug_count, dirt_pile, worm_player.last_action]
+""" % [dirt_pile]
 	
 	label.text = panel_text
 	
 	# Update panel visibility and position based on is_open
 	if is_open:
-		panel_container.position = Vector2(10, 10)
+		panel_container.position = Vector2(10, 320)
 	else:
-		panel_container.position = Vector2(-340, 10)
-
-func _on_hunger_changed(_new_hunger: float) -> void:
-	if is_open:
-		_update_panel()
+		panel_container.position = Vector2(-300, 10)
 
 func _on_inventory_changed(_inventory: Dictionary) -> void:
-	if is_open:
-		_update_panel()
-
-func _on_worm_died() -> void:
-	if is_open:
-		_update_panel()
-
-func _on_tile_changed(_tile_type: int) -> void:
 	if is_open:
 		_update_panel()

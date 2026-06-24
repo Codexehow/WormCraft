@@ -3,16 +3,20 @@
 [ext_resource type="PackedScene" uid="uid://cqn3xgkbqsvsl" path="res://scenes/world/LayeredTestWorld.tscn" id="1_a0c3d"]
 [ext_resource type="PackedScene" uid="uid://cwmgvlvvvvqsn" path="res://scenes/player/WormPlayer.tscn" id="2_p3k5c"]
 [ext_resource type="PackedScene" uid="uid://duy4qpyqn7jjh" path="res://scenes/ui/StatusFlyout.tscn" id="3_r5a9e"]
+[ext_resource type="PackedScene" uid="uid://b5s8d23g85bg0" path="res://scenes/ui/InventoryFlyout.tscn" id="4_rz7f1"]
+[ext_resource type="Script" uid="uid://estfceeaqlj2" path="res://scripts/main.gd" id="5_1h1y3"]
 
-[node name="Main" type="Node2D" unique_id=437827247]
+[node name="Main" type="Node2D" unique_id=365807381]
+script = ExtResource("5_1h1y3")
 
-[node name="LayeredTestWorld" parent="." unique_id=1748798326 instance=ExtResource("1_a0c3d")]
+[node name="LayeredTestWorld" parent="." unique_id=25231345 instance=ExtResource("1_a0c3d")]
 
-[node name="WormPlayer" parent="." unique_id=426490537 instance=ExtResource("2_p3k5c")]
-position = Vector2(500, 288)
+[node name="WormPlayer" parent="." unique_id=737802033 instance=ExtResource("2_p3k5c")]
+position = Vector2(768, 320)
 
-[node name="Camera2D" type="Camera2D" parent="." unique_id=1213336379]
-position = Vector2(512, 288)
-zoom = Vector2(1.5, 1.5)
+[node name="Camera2D" type="Camera2D" parent="." unique_id=472941140]
+zoom = Vector2(2, 2)
 
-[node name="StatusFlyout" parent="." unique_id=2019680943 instance=ExtResource("3_r5a9e")]
+[node name="StatusFlyout" parent="." unique_id=1377661608 instance=ExtResource("3_r5a9e")]
+
+[node name="InventoryFlyout" parent="." unique_id=791831539 instance=ExtResource("4_rz7f1")]

@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://b5s8d23g85bg0"]
+
+[ext_resource type="Script" path="res://scripts/ui/inventory_flyout.gd" id="1_a8l2a"]
+
+[node name="InventoryFlyout" type="CanvasLayer"]
+script = ExtResource("1_a8l2a")
