@@ -57,6 +57,7 @@ func _process(_delta: float) -> void:
 
 func toggle_panel() -> void:
 	is_open = !is_open
+	_update_panel()
 	if is_open:
 		print("Inventory panel opened.")
 	else:
