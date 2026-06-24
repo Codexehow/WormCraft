@@ -1,0 +1,18 @@
+[gd_scene load_steps=3 format=3 uid="uid://cwmgvlvvvvqsn"]
+
+[ext_resource type="Script" path="res://scripts/player/worm_player.gd" id="1_2j3h5"]
+[ext_resource type="Texture2D" path="res://assets/generated/worm_simple_frame_0.png" id="1_p3k9m"]
+
+[sub_resource type="CapsuleShape2D" id="1_kmk3g"]
+radius = 8.0
+height = 16.0
+
+[node name="WormPlayer" type="CharacterBody2D"]
+script = ExtResource("1_2j3h5")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("1_p3k9m")
+scale = Vector2(1.5, 1.5)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("1_kmk3g")

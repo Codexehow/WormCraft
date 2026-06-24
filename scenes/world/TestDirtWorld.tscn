@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://bs5yyjvt52u5r"]
+
+[ext_resource type="Script" path="res://scripts/world/test_dirt_world.gd" id="1_b2c3d"]
+
+[node name="TestDirtWorld" type="Node2D"]
+script = ExtResource("1_b2c3d")

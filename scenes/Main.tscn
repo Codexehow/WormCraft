@@ -1,0 +1,18 @@
+[gd_scene format=3 uid="uid://byxoqg7kyb0gp"]
+
+[ext_resource type="PackedScene" uid="uid://bs5yyjvt52u5r" path="res://scenes/world/TestDirtWorld.tscn" id="1_a0c3d"]
+[ext_resource type="PackedScene" uid="uid://cwmgvlvvvvqsn" path="res://scenes/player/WormPlayer.tscn" id="2_p3k5c"]
+[ext_resource type="PackedScene" uid="uid://cbgkq8je0sj2f" path="res://scenes/ui/DebugHUD.tscn" id="3_r5a9e"]
+
+[node name="Main" type="Node2D" unique_id=437827247]
+
+[node name="TestDirtWorld" parent="." unique_id=1748798326 instance=ExtResource("1_a0c3d")]
+
+[node name="WormPlayer" parent="." unique_id=426490537 instance=ExtResource("2_p3k5c")]
+position = Vector2(400, 288)
+
+[node name="Camera2D" type="Camera2D" parent="." unique_id=1213336379]
+position = Vector2(512, 288)
+zoom = Vector2(1.5, 1.5)
+
+[node name="DebugHUD" parent="." unique_id=2019680943 instance=ExtResource("3_r5a9e")]
