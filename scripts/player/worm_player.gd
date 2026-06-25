@@ -13,6 +13,11 @@ const GRAVITY: float = 200.0  # pixels per second squared
 const MAX_FALL_SPEED: float = MOVE_SPEED * 2.0
 const STEP_COOLDOWN_SECONDS: float = 0.16
 
+# Fall tracking constants
+const FALL_TRACKING_ENABLED: bool = true
+const LETHAL_FALL_TILES: int = 3  # Falls of this magnitude or greater are lethal.
+const WARNING_FALL_TILES: int = 2
+
 # Placement constants
 const DIRT_PILE_PLACE_COST: int = 1
 
@@ -35,6 +40,12 @@ var facing_direction: Vector2 = Vector2.RIGHT
 var last_action: String = ""
 var step_cooldown: float = 0.0
 var _raw_place_key_was_down: bool = false
+
+# Fall tracking state
+var is_falling: bool = false
+var fall_start_grid_y: int = 0
+var last_fall_distance_tiles: int = 0
+var death_cause: String = ""
 
 # Animation state
 var worm_animation: WormAnimation = null
@@ -182,9 +193,17 @@ func _physics_process(delta: float) -> void:
 		# W/Up must never create negative/upward velocity here.
 		var below_pos: Vector2i = Vector2i(current_grid_pos.x, current_grid_pos.y + 1)
 		if world.is_passable(below_pos):
+			if FALL_TRACKING_ENABLED and not is_falling:
+				is_falling = true
+				fall_start_grid_y = current_grid_pos.y
 			velocity.y += GRAVITY * delta
 			velocity.y = clamp(velocity.y, 0.0, MAX_FALL_SPEED)
 		else:
+			if FALL_TRACKING_ENABLED and is_falling:
+				var fall_distance_tiles: int = max(current_grid_pos.y - fall_start_grid_y, 0)
+				_resolve_tracked_fall(fall_distance_tiles)
+				is_falling = false
+				fall_start_grid_y = current_grid_pos.y
 			if velocity.y > 0.0:
 				velocity.y = 0.0
 		
@@ -367,17 +386,55 @@ func _update_current_tile() -> void:
 		current_tile_type = world.get_tile_type(grid_pos)
 		emit_signal("tile_changed", current_tile_type)
 
-func _on_starve() -> void:
+func _resolve_tracked_fall(fall_distance_tiles: int) -> void:
+	last_fall_distance_tiles = fall_distance_tiles
+
+	if fall_distance_tiles <= 0:
+		return
+
+	if fall_distance_tiles >= LETHAL_FALL_TILES:
+		last_action = "Fell %d tiles. The worm ruptured." % fall_distance_tiles
+		print(last_action)
+		_on_fall_death()
+	elif fall_distance_tiles >= WARNING_FALL_TILES:
+		last_action = "Fell %d tiles. Dangerous drop." % fall_distance_tiles
+		print(last_action)
+	else:
+		last_action = "Fell %d tile." % fall_distance_tiles
+		print(last_action)
+
+
+func _on_fall_death() -> void:
+	if not is_alive:
+		return
+
 	is_alive = false
+	death_cause = "fall"
 	velocity = Vector2.ZERO
-	print("The worm has starved.")
+	emit_signal("worm_died")
+
+func _on_starve() -> void:
+	if not is_alive:
+		return
+
+	is_alive = false
+	death_cause = "starvation"
+	velocity = Vector2.ZERO
+	last_action = "The worm has starved."
+	print(last_action)
 	emit_signal("worm_died")
 
 func get_status_text() -> String:
 	if is_alive:
 		return "Alive"
-	else:
-		return "Starved"
+
+	match death_cause:
+		"starvation":
+			return "Starved"
+		"fall":
+			return "Dead - Fall"
+		_:
+			return "Dead"
 
 func get_facing_direction_name() -> String:
 	if facing_direction == Vector2.LEFT:
@@ -405,6 +462,10 @@ func get_inventory_capacity(item_id: String) -> int:
 	if item_id == "dirt_pile":
 		return DIRT_PILE_CAPACITY
 	return -1
+
+func get_last_fall_distance_tiles() -> int:
+	return last_fall_distance_tiles
+
 
 func get_dig_target_grid_pos() -> Vector2i:
 	"""Public wrapper: returns the grid position of the tile that would be dug."""

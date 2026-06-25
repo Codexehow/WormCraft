@@ -5,6 +5,7 @@
 [ext_resource type="PackedScene" uid="uid://duy4qpyqn7jjh" path="res://scenes/ui/StatusFlyout.tscn" id="3_r5a9e"]
 [ext_resource type="PackedScene" uid="uid://b5s8d23g85bg0" path="res://scenes/ui/InventoryFlyout.tscn" id="4_rz7f1"]
 [ext_resource type="Script" uid="uid://estfceeaqlj2" path="res://scripts/main.gd" id="5_1h1y3"]
+[ext_resource type="PackedScene" uid="uid://bpvd5sfi0kqfq" path="res://scenes/ui/DeathScreen.tscn" id="6_7d1e3"]
 
 [node name="Main" type="Node2D" unique_id=365807381]
 script = ExtResource("5_1h1y3")
@@ -20,3 +21,5 @@ zoom = Vector2(2, 2)
 [node name="StatusFlyout" parent="." unique_id=1377661608 instance=ExtResource("3_r5a9e")]
 
 [node name="InventoryFlyout" parent="." unique_id=791831539 instance=ExtResource("4_rz7f1")]
+
+[node name="DeathScreen" parent="." unique_id=11223344 instance=ExtResource("6_7d1e3")]

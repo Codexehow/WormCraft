@@ -43,6 +43,9 @@ var _raw_target_preview_key_was_down: bool = false
 
 # (removed: dirt uses a single atlas tile now)
 
+# Starter spawn position — must be EMPTY with solid tile below
+const START_GRID_POS: Vector2i = Vector2i(48, 23)
+
 # Durability values for diggable tiles
 const DIRT_MAX_DURABILITY: int = 24
 const SURFACE_MAX_DURABILITY: int = 24
@@ -222,6 +225,90 @@ func _initialize_starter_layout() -> void:
 	tile_grid[20][57] = TileType.ROCK
 	tile_grid[19][57] = TileType.ROCK
 
+	# Ensure spawn tile is EMPTY and tile below is solid for safe spawn
+	tile_grid[START_GRID_POS.y][START_GRID_POS.x] = TileType.EMPTY
+	if is_in_bounds(Vector2i(START_GRID_POS.x, START_GRID_POS.y + 1)):
+		tile_grid[START_GRID_POS.y + 1][START_GRID_POS.x] = TileType.DIRT
+
+	# Plug the bottom of the vertical tunnel at x=45 so the worm can walk
+	# across y=22 level without falling into the small oval below.
+	# The tunnel remains 2 tiles deep (y=20 to y=22) for visual interest.
+	tile_grid[23][45] = TileType.DIRT
+
+	# Add fall test geometry to the left of the pocket
+	_carve_fall_test_geometry()
+
+
+func _carve_fall_test_geometry() -> void:
+	"""
+	Carve three reachable test drops along a walkway at y=22.
+	
+	Key insight: the worm moves at 60px/s while falling, so each drop must be
+	multiple tiles wide to prevent the worm from sliding sideways off the
+	drop column before completing the full fall distance.
+	
+	Layout (right to left):
+	  x=45-43: solid walkway (into pocket)
+	  x=42-41: 1-tile drop (2 tiles wide)
+	  x=40-39: solid recovery walkway
+	  x=38-37: 2-tile drop (2 tiles wide)
+	  x=36-35: solid recovery walkway
+	  x=34-33: 3-tile drop (2 tiles wide)
+	  x=32-30: recovery ramp back to walkway
+	"""
+	# Horizontal walkway at y=22
+	_carve_h_tunnel(22, 30, 44)
+
+	# --- 1-tile drop (2 tiles wide: x=42,41) ---
+	# Fall from y=22 through y=23, land on DIRT at y=24
+	tile_grid[23][42] = TileType.EMPTY
+	tile_grid[23][41] = TileType.EMPTY
+	tile_grid[24][42] = TileType.DIRT
+	tile_grid[24][41] = TileType.DIRT
+
+	# Recovery: worm at y=23, step LEFT -> (40,23)=DIRT -> step-up to (40,22)
+
+	# --- 2-tile drop (2 tiles wide: x=38,37) ---
+	# Fall from y=22 through y=23,24, land on DIRT at y=25
+	tile_grid[23][38] = TileType.EMPTY
+	tile_grid[23][37] = TileType.EMPTY
+	tile_grid[24][38] = TileType.EMPTY
+	tile_grid[24][37] = TileType.EMPTY
+	tile_grid[25][38] = TileType.DIRT
+	tile_grid[25][37] = TileType.DIRT
+
+	# Recovery from 2-tile: worm at y=24, step LEFT -> (36,24)=DIRT -> step-up
+	# above=(37 or 38, 23)=EMPTY, step=(36,23), below=(37 or 38,25)=DIRT
+	# Carve (36,23)=EMPTY, (36,24)=DIRT for step-up, creating a 1-tile drop at x=36
+	tile_grid[23][36] = TileType.EMPTY
+	tile_grid[24][36] = TileType.DIRT
+	# Worm steps up to (36,23), then walks LEFT: (35,23)=DIRT -> step-up to (35,22)
+	# (35,23) stays DIRT, step=(35,22)=walkway
+
+	# --- 3-tile drop (2 tiles wide: x=34,33) ---
+	# Fall from y=22 through y=23,24,25, land on DIRT at y=26
+	tile_grid[23][34] = TileType.EMPTY
+	tile_grid[23][33] = TileType.EMPTY
+	tile_grid[24][34] = TileType.EMPTY
+	tile_grid[24][33] = TileType.EMPTY
+	tile_grid[25][34] = TileType.EMPTY
+	tile_grid[25][33] = TileType.EMPTY
+	tile_grid[26][34] = TileType.DIRT
+	tile_grid[26][33] = TileType.DIRT
+
+	# Recovery from 3-tile: worm at y=25, step LEFT -> (32,25)=DIRT -> step-up
+	# above=(33 or 34, 24)=EMPTY, step=(32,24), below=(33 or 34,26)=DIRT
+	tile_grid[24][32] = TileType.EMPTY
+	tile_grid[25][32] = TileType.DIRT
+	# Worm at (32,24): step LEFT -> (31,24)=DIRT -> step-up
+	# above=(32,23), step=(31,23), below=(32,25)=DIRT
+	tile_grid[23][32] = TileType.EMPTY
+	tile_grid[23][31] = TileType.EMPTY
+	tile_grid[24][31] = TileType.DIRT
+	# Worm at (31,23): step LEFT -> (30,23)=DIRT -> step-up
+	# above=(31,22)=walkway, step=(30,22)=walkway, below=(31,24)=DIRT
+	# Back on walkway at (30,22)
+
 
 func _carve_oval_pocket(center: Vector2i, radius_x: int, radius_y: int) -> void:
 	"""Carve an elliptical empty pocket into the tile grid."""
@@ -307,7 +394,7 @@ func grid_to_world_center(grid_position: Vector2i) -> Vector2:
 
 func get_start_grid_position() -> Vector2i:
 	"""Return the grid position where the worm should spawn."""
-	return Vector2i(48, 20)
+	return START_GRID_POS
 
 func get_start_world_position() -> Vector2:
 	"""Return the world pixel position (tile center) where the worm should spawn."""
