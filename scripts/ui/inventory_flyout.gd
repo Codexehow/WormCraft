@@ -70,12 +70,14 @@ func _update_panel() -> void:
 	
 	var dirt_pile: int = worm_player.get_inventory_count("dirt_pile")
 	var dirt_capacity: int = worm_player.get_inventory_capacity("dirt_pile")
+	var spider_silk: int = worm_player.get_inventory_count("spider_silk_sample")
 	
 	var panel_text: String = """INVENTORY
 
 Quantum Space Folder
 Dirt Pile: %d / %d
-""" % [dirt_pile, dirt_capacity]
+Spider Silk Sample: %d
+""" % [dirt_pile, dirt_capacity, spider_silk]
 	
 	label.text = panel_text
 	

@@ -73,6 +73,14 @@ func _ready() -> void:
 	if not InputMap.has_action("place_dirt"):
 		push_warning("InputMap action 'place_dirt' is missing. Add it in Project Settings > Input Map and bind it to F.")
 
+	# Ensure interact action exists (R key for scanning, inspecting, sampling)
+	if not InputMap.has_action("interact"):
+		var interact_event := InputEventKey.new()
+		interact_event.keycode = KEY_R
+		InputMap.add_action("interact")
+		InputMap.action_add_event("interact", interact_event)
+		push_warning("InputMap action 'interact' was missing — created at runtime and bound to R.")
+
 	# Initialize animation helper
 	worm_animation = WormAnimation.new()
 	add_child(worm_animation)
@@ -124,6 +132,10 @@ func _process(delta: float) -> void:
 
 	if place_pressed:
 		_on_place_dirt_input()
+	
+	# Handle interact input (R key — scanning, inspecting, sampling)
+	if Input.is_action_just_pressed("interact"):
+		_on_interact_input()
 
 func _physics_process(delta: float) -> void:
 	if not is_alive:
@@ -339,6 +351,35 @@ func _on_place_dirt_input() -> void:
 		emit_signal("inventory_changed", inventory)
 	
 	print(result["message"])
+
+func _on_interact_input() -> void:
+	"""
+	Handle interact input (R key). Scans/inspects the prop in front of the worm.
+	"""
+	print("Interact pressed.")
+	if not is_alive or not world:
+		return
+
+	var target_grid_pos: Vector2i = _get_target_grid_pos()
+	# Use fallback range (Manhattan distance <= 1 around target) to make
+	# interaction reachable even if the worm isn't perfectly aligned to the prop tile.
+	var result: Dictionary = world.try_interact_prop_near(target_grid_pos, 1)
+
+	last_action = result["message"]
+
+	if result["success"]:
+		var resource_id: String = result.get("resource_id", "")
+		var amount: int = result.get("resource_amount", 0)
+		if resource_id != "" and amount > 0:
+			_add_inventory_item(resource_id, amount)
+
+		# Spawn particle burst at effect position
+		var effect_pos: Vector2 = result.get("effect_world_pos", Vector2.ZERO)
+		if effect_pos != Vector2.ZERO:
+			world._spawn_scan_particles_at(effect_pos)
+
+	print(result["message"])
+
 
 func _on_eat_food_input() -> void:
 	"""

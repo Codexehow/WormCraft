@@ -1,0 +1,1441 @@
+# WormCraft / Soil to Sun — Progress Summary
+
+## Thread Summary: VS003 Completion, VS004 Visual/Interaction Pass, and DeepSeek Workflow Discovery
+
+## High-Level Result
+
+This thread moved the project from a crude but functional worm/dirt prototype into the beginning of a readable game slice.
+
+The biggest accomplishments were:
+
+* Dirt placement became functional.
+* The world moved from 16px tiles toward 32px terrain tiles.
+* A new animated brain-worm sprite was integrated.
+* Dirt rendering now uses actual texture art instead of only debug colors.
+* Target preview was implemented.
+* Dig damage feedback was implemented.
+* Natural dirt durability was raised to 24 hits to make manual digging feel intentionally slow.
+* DeepSeek/Ziva workflow was proven viable for cheap, surgical Godot edits when tightly constrained.
+
+The project now has the first real signs of a playable loop: the worm can move, dig, place dirt, see what it is targeting, damage dirt over time, and interact with a more visually readable world.
+
+---
+
+# 1. VS003 — Dirt Placement and Tunnel Shaping
+
+## Dirt Placement Added
+
+A `place_dirt` action was added and bound to **F**.
+
+The player can now spend Dirt Pile from inventory to place dirt into the tile in front of the worm.
+
+Placed dirt is treated differently from natural dirt:
+
+* Natural dirt: 24 digs, +5 Dirt Pile when cleared
+* Placed dirt: 4 digs, +1 Dirt Pile when cleared
+
+This prevents dirt duplication loops.
+
+## Placement Debugging
+
+Initial reports claimed placement was working, but playtesting showed it was not. The issue was that `place_dirt` was not actually present in the Input Map.
+
+This confirmed that human playtesting is necessary. Ziva/agent reports cannot be trusted without manual verification.
+
+## Inventory / Status Flyout Fixes
+
+An issue was found where the Inventory flyout opened with **I** but did not close. This violated the minimal/flyout UI philosophy.
+
+The fix updated the flyout logic so toggling immediately updates panel position after changing `is_open`.
+
+Status flyout behavior was also corrected similarly.
+
+---
+
+# 2. Shift from Ziva/Haiku to DeepSeek Micro-Edits
+
+## Cost Discovery
+
+Using Ziva with stronger models cost more than expected for small tasks. Some simple script replacements or minor actions cost several dollars.
+
+DeepSeek through Ziva was later tested and proved dramatically cheaper, sometimes costing less than a cent for useful changes.
+
+## Workflow Change
+
+The project workflow shifted to:
+
+* ChatGPT: architecture, diagnosis, prompt design, code review
+* DeepSeek/Ziva: cheap Godot implementation intern
+* User: playtester, visual judge, commit gatekeeper
+
+This workflow proved effective when prompts were extremely narrow.
+
+## Key Lesson
+
+DeepSeek works if:
+
+* one task is given at a time
+* allowed files are specified
+* forbidden files are specified
+* the exact behavior is described
+* unrelated refactors are explicitly forbidden
+* the user playtests afterward
+
+DeepSeek should not be asked to design, improvise, or broadly “fix” a system.
+
+---
+
+# 3. VS004 — Visual / Interaction Clarity Pass
+
+## Original VS004 Goal
+
+VS004 was defined as:
+
+**Target Preview, Interaction Clarity, and Readability Tiles**
+
+The goal was not new gameplay content. The goal was to make current actions readable:
+
+* What tile will be dug?
+* What tile will receive placed dirt?
+* Which direction is the worm facing?
+* What tile types are present?
+* How damaged is the target block?
+* What is dirt vs placed dirt vs rock vs empty space?
+
+---
+
+# 4. Tile Art / Dirt Rendering
+
+## 16px Tiles Reconsidered
+
+The project originally used 16px tiles for Terraria-like density, but generated art from Ludo looked much better at higher resolution.
+
+We decided the game does not need to look like an NES game. The tile scale was moved toward **32px**.
+
+## Dirt Texture Pipeline
+
+Ludo produced large source images, often 768x768 or 1024x1024. These cannot be used directly as game tiles.
+
+The correct pipeline became:
+
+* Large image = source art
+* 32x32 PNG = actual game asset
+
+A 32x32 dirt tile was generated/resized and placed in:
+
+`res://assets/tiles/dirt.png`
+
+## Atlas Failure
+
+DeepSeek/Ziva initially tried to treat the large dirt image as an atlas. This produced broken visuals: random chunks, gray blocks, and black gaps.
+
+Diagnosis: the renderer sampled arbitrary regions from a large texture instead of drawing a single 32x32 tile.
+
+## TileMapLayer Split-Brain Problem
+
+A later attempt introduced `TileMapLayer` rendering while gameplay still used `tile_grid`.
+
+This caused a split-brain world:
+
+* visuals came from TileMapLayer
+* gameplay came from `tile_grid`
+
+Symptoms included:
+
+* worm walking through visible walls
+* digging saying “Nothing to dig”
+* visible dirt not disappearing when dug
+
+Fix:
+
+* Removed TileMapLayer path
+* Removed TileSet/atlas dependency
+* Restored `tile_grid` as the single source of truth
+* Manual `_draw()` rendering now draws from `tile_grid`
+* Dirt texture is drawn for `TileType.DIRT`
+* Other tile types fall back to debug colors unless textured
+
+This was one of the most important architectural corrections in the thread.
+
+## Multiple Dirt Variants
+
+Dirt variants were introduced conceptually:
+
+* `dirt.png`
+* `dirt2.png`
+* `dirt3.png`
+
+All are still `TileType.DIRT` behaviorally.
+
+They should be selected randomly or deterministically per cell for visual variety, without creating new tile types.
+
+Key rule: variant selection must be stable per tile and must not randomize every frame.
+
+## Transparent Edge Issue
+
+Some Ludo textures produced transparent edges/padding. Godot showed gray behind those transparent pixels.
+
+Resolution:
+
+* Full terrain tiles should be opaque.
+* Transparency is appropriate for sprites, cracks, particles, and UI, not for full dirt/rock/surface blocks.
+* Terrain assets should be 32x32 opaque PNGs with no transparent margins.
+
+---
+
+# 5. Worm Sprite / Animation Integration
+
+## Brain-Worm Character Direction
+
+A protagonist visual direction was developed:
+
+* sapient earthworm
+* comically enlarged visible brain
+* brain integrated into flesh
+* weird but charming
+* not humanoid
+* no arms/legs/weapons
+* head/front must be readable
+
+Several Ludo outputs were evaluated. The final direction used a more worm-like body with a visible enlarged brain.
+
+## Sprite Sheet
+
+A 6x6 sprite sheet of the brain-worm was generated. It was visually promising but not directly game-ready because:
+
+* too many frames
+* inconsistent spacing
+* not cleanly packed
+* oversized compared to original 48x16 target
+
+Still, it worked as source material.
+
+## Animated Sprite Integration
+
+The animated worm sprite was integrated.
+
+Sprite-facing behavior uses separate left/right textures rather than `flip_h`.
+
+The worm visually looked much better, but introduced alignment issues due to sprite size and origin mismatch.
+
+## Wall / Offset Issue
+
+The worm appeared to overlap walls because its sprite body extended beyond the logical collision/tile point.
+
+A directional offset fix was discussed: if using flipped sprites, X offset must mirror. However, the current system uses separate left/right textures.
+
+## Ground Floating Issue
+
+The worm appeared to float above the floor.
+
+Initial DeepSeek fix tried to align sprite bottom with collision math. That did not solve the visual issue.
+
+We corrected the prompt to emphasize viewport/visual confirmation instead of math.
+
+Final successful visual offset:
+
+`Sprite2D.offset = Vector2(-40, -2.5)`
+
+This made the worm appear visually grounded in the pocket.
+
+Key lesson:
+
+**For visual alignment, mathematical collision alignment is not enough. Viewport-based human feedback is required.**
+
+---
+
+# 6. Spawn / Pocket Issues
+
+After moving to 32px tiles, the worm appeared to start near the surface.
+
+Diagnosis: likely old pixel-based spawn position did not match new tile size.
+
+Fix direction:
+
+* `LayeredTestWorld` exposes start position via grid coordinates.
+* The worm should spawn using `world.grid_to_world_center(Vector2i(48, 20))`.
+* This prevents future tile-size changes from breaking spawn position.
+
+The worm now starts in the underground pocket.
+
+The pocket is larger because 32px tiles make each tile physically larger. That is acceptable for now.
+
+---
+
+# 7. Target Preview
+
+## Implemented
+
+A procedural target preview was added.
+
+It shows the tile the worm is targeting for interaction.
+
+It makes digging and placement much clearer.
+
+## Toggle Added
+
+The target preview originally stayed on all the time, which violated the minimal UI philosophy.
+
+We decided it should be optional.
+
+A Q toggle was added:
+
+* Q turns target preview on
+* Q turns target preview off
+* default should be off
+
+This fits the design philosophy: information should appear when the player wants to work, not live permanently on screen.
+
+---
+
+# 8. Dig Durability Tuning
+
+## Natural Dirt Changed to 24 Hits
+
+Base worm digging was changed:
+
+* Natural dirt: 24 hits
+* Surface: 24 hits
+* Placed dirt: 4 hits
+
+Design reason:
+
+Manual digging should feel slow and tedious enough that the player wants to invent tools, build machines, or explore for better materials.
+
+The base worm should not be an efficient mining machine.
+
+This change was made before adding damage visuals so the damage overlay could be designed around the correct values.
+
+---
+
+# 9. Procedural Dig Damage Overlay
+
+## Implemented
+
+A procedural damage overlay was added.
+
+When a tile is partially dug, cracks/marks appear over it.
+
+The overlay:
+
+* uses `tile_durability`
+* draws procedurally with lines
+* intensifies as the tile nears breaking
+* draws over dirt/surface/placed dirt
+* disappears when the tile becomes empty
+* renders below the target preview
+
+The first version is visually crude but functional.
+
+It confirms the data/rendering pipeline works.
+
+## Current Behavior
+
+* Natural dirt confirms `Digging dirt: 1 / 24`
+* Damage appears before clearing
+* Target preview still draws on top
+* No gameplay logic was changed
+
+This passes the prototype requirement even though the art can be improved later.
+
+---
+
+# 10. Placed Dirt Texture Issue
+
+A persistent issue was found where `placed_dirt.png` had been replaced but the game still showed plain yellow.
+
+Diagnosis:
+
+`PLACED_DIRT` was probably still using fallback debug color rather than loading the texture.
+
+A surgical prompt was prepared to make `TileType.PLACED_DIRT` render from:
+
+`res://assets/tiles/placed_dirt.png`
+
+Behavior must remain:
+
+* blocked
+* diggable
+* 4 hits
+* clears to empty
+* returns +1 Dirt Pile
+
+Placed dirt should not be treated as natural dirt and should not use random dirt variants.
+
+---
+
+# 11. Current Known Visual Issues / Polish Remaining
+
+## Terrain Art
+
+Currently, only dirt has significant texture work. Other tile types still need proper 32x32 opaque assets:
+
+* empty_tunnel.png
+* surface.png
+* rock.png
+* placed_dirt.png
+* air.png
+
+Priority order:
+
+1. Empty tunnel
+2. Placed dirt
+3. Rock
+4. Surface
+5. Air
+
+## Damage Overlay
+
+The procedural cracks work but are ugly. Later they can be replaced with crack overlay PNGs:
+
+* crack_1.png
+* crack_2.png
+* crack_3.png
+
+## Pocket Shape
+
+The starting pocket is still rectangular. To make it rounder, the generator should carve a radius/circle-like pocket instead of a square loop.
+
+This is a world-generation change, not a texture transparency issue.
+
+## Texture Transparency
+
+Full terrain blocks should be opaque. Transparent margins produce gray/incorrect background edges.
+
+---
+
+# 12. Current Commit Candidate
+
+The current build appears commit-worthy once final regression passes.
+
+Likely included changes:
+
+* 32px tile scale
+* dirt texture rendering
+* dirt variants
+* animated worm sprite
+* worm spawn correction
+* worm visual alignment
+* target preview
+* Q toggle for preview
+* 24-hit natural dirt
+* procedural dig damage overlay
+* placed dirt texture fix
+
+Suggested commit name:
+
+`Add 32px terrain visuals and interaction feedback`
+
+Alternative:
+
+`Add target preview and 32px terrain feedback`
+
+---
+
+# 13. Final Pre-Commit Regression Checklist
+
+Before committing, verify:
+
+* Worm starts in underground pocket
+* Worm appears grounded
+* A/D movement works
+* W/S changes facing/targeting
+* Q toggles target preview
+* Space digs the highlighted tile
+* Natural dirt takes 24 hits
+* Natural dirt gives +5 Dirt Pile
+* Damage overlay appears and intensifies
+* Damage overlay disappears after tile clears
+* F places dirt
+* Placed dirt uses placed_dirt.png
+* Placed dirt takes 4 hits
+* Placed dirt gives +1 Dirt Pile
+* Rock cannot be dug
+* Inventory opens/closes with I
+* Status opens/closes with Tab
+* No runtime errors
+* `git diff` shows no unrelated file changes
+
+---
+
+# 14. Main Workflow Lesson
+
+This thread proved that the best current workflow is:
+
+1. User + ChatGPT design the next microscopic change.
+2. ChatGPT writes a highly constrained DeepSeek/Ziva prompt.
+3. DeepSeek edits only the allowed file(s).
+4. User playtests visually and functionally.
+5. ChatGPT diagnoses screenshots/reports.
+6. Commit only after human verification.
+
+DeepSeek is useful as a cheap implementation intern, not as a designer.
+
+The project now has a workable AI-assisted development loop.
+
+-------
+
+
+Progress Report 2 
+
+# WormCraft / Soil to Sun — Progress Summary
+
+## Thread Summary: VS005 Completion, VS006 Fall Damage, Death Screen, and Git Cleanup
+
+## High-Level Result
+
+This thread advanced the project from a readable burrowing prototype into a more characterful and dangerous early-game slice.
+
+The main accomplishments were:
+
+* The worm’s backstory was clarified.
+* The starting pocket became a workshop/bunker instead of a generic spawn room.
+* A limited Quantum Space Folder was added as the first functional “advanced but constrained” invention.
+* Dirt Pile storage now has a capacity limit.
+* Fall tracking was added safely in stages.
+* Spawn geometry was corrected so the worm no longer begins in a lethal-distance fall.
+* Test terrain was added for 1-, 2-, and 3-tile falls.
+* Lethal fall damage was implemented.
+* A full-screen death screen was added.
+* VS006 was committed.
+* A bad `nul` filesystem artifact blocked `git add .`, and the workaround was found.
+
+The project now has a stronger identity:
+
+The player is not just a worm digging dirt.
+
+The player is the only human-level intelligent earthworm in existence: brilliant, ancient, bored, fragile, trapped in a backyard, and trying to bootstrap a civilization from scraps.
+
+---
+
+# 1. Backstory / Game Identity Clarified
+
+## Core Premise Refinement
+
+The worm has been alive since the 1980s.
+
+He has lived in the backyard of a tax attorney for decades.
+
+He is the first and only human-level intelligent earthworm in the universe, and he knows it.
+
+He is bored, lonely, paranoid, arrogant, and fragile.
+
+The backyard is not a cute setting. It is a dangerous world of giants, brutes, grass-pillars, falling objects, and scavenged relics.
+
+The worm has already built a few machines before the game starts.
+
+The game begins in medias res, with the worm already living in a small workshop pocket.
+
+## Long-Term Goal
+
+The worm’s ultimate goal is to escape Earth and begin a worm civilization on a low-gravity body such as an asteroid, moonlet, or planetoid.
+
+Eventually, he will need to find a suitable mate and use advanced biological manipulation to create intelligent offspring.
+
+This long-term goal is not for early access.
+
+Early access should focus on:
+
+* backyard survival
+* burrow expansion
+* storage
+* scavenging
+* first machines
+* first brute interactions
+* surface risk
+* early ecosystem manipulation
+
+## “Brutes”
+
+Ordinary arthropods are called “brutes” by the worm.
+
+This term is good and should remain.
+
+It expresses the worm’s superior intelligence and contempt while also highlighting his physical vulnerability.
+
+Examples:
+
+* ants: disciplined brutes
+* beetles: armored brutes
+* spiders: silk brutes
+* crows: sky brutes with negotiable intelligence
+* humans: distant, blurry, incomprehensible giants
+
+---
+
+# 2. Visual Scale Rule
+
+A major visual rule was established:
+
+Everything must be shown from worm scale.
+
+This means:
+
+* a blade of grass is almost as thick as the worm
+* pebbles are boulders
+* a child’s bead is a major relic
+* plastic scraps are powerful synthetic materials
+* spider silk is industrial cable
+* humans should be distant, blurry, partial, or implied
+* boots, mower blades, watering cans, and shadows matter more than human faces
+
+Humans should not appear as normal readable characters unless the game intentionally breaks scale for horror.
+
+This rule should influence all future art prompts and level design.
+
+---
+
+# 3. VS005 — Starting Workshop Pocket and Quantum Folder Capacity
+
+## Purpose
+
+VS005 made the starting area feel like the actual beginning of the game.
+
+The starting pocket is now a workshop/bunker/refuge, not a debug box.
+
+The slice added environmental storytelling and a functional inventory constraint without adding full crafting or real machines.
+
+## DeepSeek / Ziva Implementation
+
+The VS005 brief was deliberately surgical.
+
+Allowed files:
+
+* `res://scripts/world/layered_test_world.gd`
+* `res://scripts/player/worm_player.gd`
+* `res://scripts/ui/inventory_flyout.gd`
+* `res://scripts/ui/status_flyout.gd`
+
+DeepSeek reportedly edited exactly those four files.
+
+## Organic Starting Pocket
+
+The previous rectangular/square pocket was replaced with an organic oval pocket.
+
+Reported shape:
+
+* center: `(48, 20)`
+* radius: `5 x 3`
+* approximate size: 11 x 7 tiles
+
+The goal was to make the spawn feel like a burrow/workshop instead of a debug room.
+
+## Starter Layout
+
+A small handcrafted starter layout was added:
+
+* left tunnel
+* right tunnel
+* downward nook
+* upward tunnel stub
+* rock blockage
+* diggable dirt nearby
+
+The upward tunnel stub does not reach the surface.
+
+This preserves the sense that the surface exists above, but surface gameplay has not begun yet.
+
+## Workshop Props
+
+Five nonfunctional procedural props were added:
+
+1. `dead_machine` at `(46, 19)`
+2. `wall_hooks` at `(50, 18)`
+3. `child_relic` at `(44, 23)`
+4. `quantum_folder_anchor` at `(48, 22)`
+5. `broken_satchel` at `(52, 19)`
+
+Important rules:
+
+* props are visual only
+* props do not block movement
+* props do not affect digging
+* props do not create machine behavior
+* props are drawn procedurally
+* no final art assets were required
+
+This was the correct approach. It shows the worm’s history without creating machine-system debt.
+
+---
+
+# 4. Quantum Space Folder
+
+## Design Purpose
+
+The Quantum Space Folder is the worm’s first functional advanced invention.
+
+It explains why the worm can store and place soil at all.
+
+But it is limited, because the worm is materially poor and cannot simply solve storage from the start.
+
+This creates pressure for future wall satchels, storage hooks, chests, and infrastructure.
+
+## Implemented Behavior
+
+Dirt Pile capacity was added.
+
+Reported value:
+
+* `DIRT_PILE_CAPACITY = 30`
+
+Inventory now displays:
+
+`Dirt Pile: X / 30`
+
+Both InventoryFlyout and StatusFlyout were updated.
+
+## Capacity Behavior
+
+The intended behavior:
+
+* natural dirt can add Dirt Pile
+* placed dirt can add Dirt Pile
+* Dirt Pile cannot exceed 30
+* if a tile is cleared while full, the tile still clears
+* excess soil is wasted
+* digging is not blocked by capacity
+* placement still spends 1 Dirt Pile
+* eating still spends 1 Dirt Pile and restores hunger
+
+The user playtest confirmed the important mechanical behavior:
+
+* Dirt Pile did not exceed `30 / 30`
+* placed dirt cleared correctly
+* placed dirt did not create a duplication loop
+
+## Minor Known Issue
+
+The console did not clearly print the expected “soil wasted” message when clearing placed dirt while the folder was full.
+
+This is a feedback bug, not a mechanical failure.
+
+It should be added to a later micro-cleanup:
+
+Capacity Feedback Cleanup:
+
+* if resource cannot fit, print `Folder full. Soil wasted.`
+* if some fits, print `Folder full. Added X, wasted Y soil.`
+* ensure `last_action` matches the printed message
+
+This should not block VS005 or VS006.
+
+---
+
+# 5. VS006 Planning — Fall Damage Split Into Parts
+
+## Initial Design
+
+The worm is extremely fragile in its natural state.
+
+A fall of three tile-spaces should kill him.
+
+This makes vertical space dangerous and gives future value to:
+
+* armor
+* ramps
+* bridges
+* placed dirt
+* wall satchels
+* safe tunnel planning
+* movement tools
+* machines
+
+## Why VS006 Was Split
+
+Fall damage is dangerous to implement because the movement/physics system is still prototype-level.
+
+If lethal damage was enabled immediately, bad fall counting could create unfair deaths.
+
+Therefore VS006 was split into staged parts:
+
+1. Part 1: fall tracking only, no death
+2. Part 2: spawn safety and fall test geometry
+3. Parts 3+4: lethal fall damage and death screen
+
+This was the right decision.
+
+---
+
+# 6. VS006 Part 1 — Fall Tracking Instrumentation
+
+## Purpose
+
+Part 1 added fall tracking without killing the worm.
+
+The goal was to measure fall distance first.
+
+## Files Edited
+
+Reported files:
+
+* `res://scripts/player/worm_player.gd`
+* `res://scripts/ui/status_flyout.gd`
+
+## Added Constants
+
+Added to `worm_player.gd`:
+
+* `FALL_TRACKING_ENABLED`
+* `LETHAL_FALL_TILES = 3`
+* `WARNING_FALL_TILES = 2`
+
+At this stage, lethal fall distance was detected but not applied.
+
+## Added State
+
+Added:
+
+* `is_falling`
+* `fall_start_grid_y`
+* `last_fall_distance_tiles`
+
+## Fall Detection
+
+A fall begins when the tile below the worm is passable and the worm was not already falling.
+
+A landing occurs when the tile below becomes solid again while `is_falling` is true.
+
+Fall distance is calculated by grid Y difference:
+
+`current_grid_y - fall_start_grid_y`
+
+## StatusFlyout Update
+
+StatusFlyout was updated to show:
+
+`Last Fall: X tiles`
+
+## Part 1 Discovery
+
+Part 1 revealed a serious issue:
+
+The worm spawned into a 3-tile fall.
+
+Console showed:
+
+`Fell 3 tiles. Lethal distance detected.`
+
+This meant lethal fall damage could not be enabled yet.
+
+If death had been enabled at this stage, the worm would have died on game start.
+
+Part 1 succeeded because it caught the problem before it became fatal.
+
+---
+
+# 7. VS006 Part 2 — Spawn Safety and Fall Test Geometry
+
+## Purpose
+
+Part 2 fixed the spawn problem and added reliable test geometry.
+
+## Files Edited
+
+Reported file:
+
+* `res://scripts/world/layered_test_world.gd`
+
+A temporary debug print was added and removed during testing.
+
+## Spawn Fix
+
+The worm’s spawn grid was moved to:
+
+`Vector2i(48, 23)`
+
+This position satisfies:
+
+* spawn tile is `EMPTY`
+* tile below spawn is `DIRT`
+* worm does not fall at startup
+
+No invulnerability hack was used.
+
+No first-fall ignore was used.
+
+The problem was fixed geometrically.
+
+That was the correct solution.
+
+## Fall Test Geometry
+
+Three test drops were added near the workshop:
+
+### 1-Tile Drop
+
+Location:
+
+* x=42 to x=41 at y=22
+
+Reported result:
+
+`Fell 1 tile.`
+
+### 2-Tile Drop
+
+Location:
+
+* x=38 to x=37 at y=22
+
+Reported result:
+
+`Fell 2 tiles. Dangerous drop.`
+
+### 3-Tile Drop
+
+Location:
+
+* x=34 to x=33 at y=22
+
+Reported result:
+
+`Fell 3 tiles. Lethal distance detected.`
+
+At this stage, the worm still survived the 3-tile fall because death had not yet been enabled.
+
+## Known Part 2 Limitations
+
+The recovery path includes incidental 1-tile drops at some tiles.
+
+This is not a major problem.
+
+The small oval at `(45, 24)` became disconnected because part of the old vertical tunnel had to be filled to prevent unintended spawn-area falling.
+
+This is acceptable for now.
+
+---
+
+# 8. VS006 Parts 3+4 — Lethal Fall Damage and Death Screen
+
+## Design Change
+
+Before enabling lethal fall damage, the death screen requirement was added.
+
+Death should not merely print to console.
+
+It should show a full-screen Terraria-like death screen.
+
+Required text:
+
+`You were one of a kind.`
+`And now you're dead.`
+
+The text should be red and centered on a black/near-black full-screen background.
+
+## Files Changed
+
+Expected files included:
+
+* `res://scripts/player/worm_player.gd`
+* `res://scripts/ui/death_screen.gd`
+* `res://scenes/ui/DeathScreen.tscn`
+* `res://scenes/Main.tscn`
+* possibly `res://scripts/ui/status_flyout.gd`
+
+## Fall Death
+
+3+ tile falls now kill the worm.
+
+Observed console sequence:
+
+* `Fell 1 tile.`
+* `Fell 2 tiles. Dangerous drop.`
+* `Fell 3 tiles. The worm ruptured.`
+
+After the 3-tile fall, the death screen appeared.
+
+## Death Screen
+
+The death screen is full-screen, black/near-black, with large centered red text.
+
+Observed screenshot confirmed:
+
+`You were one of a kind.`
+`And now you're dead.`
+
+This is the right tone.
+
+No respawn button was added.
+
+No restart button was added.
+
+No menu was added.
+
+This was correct. Death screen is terminal for now.
+
+## Death Cause
+
+The brief required adding a simple `death_cause` so StatusFlyout can distinguish:
+
+* alive
+* starved
+* dead from fall
+
+This avoids the old bug where any death might display as “Starved.”
+
+## VS006 Result
+
+VS006 is complete.
+
+The worm is now fragile.
+
+Vertical space matters.
+
+The game now has a strong early danger rule.
+
+---
+
+# 9. Commit / Git Issue
+
+## Problem
+
+While committing VS006, `git add .` failed with:
+
+`error: invalid path 'nul'`
+
+Git showed an untracked file:
+
+`nul`
+
+On Windows, `nul` is a reserved device name.
+
+Git refused to add it.
+
+This was probably created accidentally by DeepSeek/Ziva or by a bad shell redirect.
+
+## Attempted Fix
+
+PowerShell command attempted:
+
+`Remove-Item -LiteralPath "\\?\C:\GodotProjects\worm-craft\nul" -Force`
+
+But `git status` still showed `nul`.
+
+## Workaround
+
+The successful approach was:
+
+1. Add real files explicitly instead of using `git add .`
+2. Commit the intended files.
+3. Add a local exclude rule for `nul`.
+
+The local exclude apparently worked.
+
+## Lesson
+
+Avoid relying on `git add .` when junk files appear.
+
+Use explicit `git add` commands when needed.
+
+If `nul` appears again, handle it locally or exclude it.
+
+---
+
+# 10. Current Commit State
+
+VS006 was committed.
+
+Suggested commit name used/planned:
+
+`Add VS006 worm fall damage and death screen`
+
+The user reported that the commit succeeded and that excluding `nul` appeared to work.
+
+---
+
+# 11. Current Gameplay State
+
+The current game now includes:
+
+* worm movement
+* directional facing
+* digging
+* 24-hit natural dirt
+* 4-hit placed dirt
+* dirt placement
+* Dirt Pile inventory
+* Quantum Space Folder capacity at 30
+* flyout inventory UI
+* flyout status UI
+* target preview toggle
+* procedural dig damage
+* organic workshop pocket
+* nonfunctional workshop props
+* fall tracking
+* 1/2/3 tile fall test geometry
+* lethal 3+ tile fall damage
+* full-screen death screen
+
+The game is no longer just a dirt prototype.
+
+It now has:
+
+* identity
+* fragility
+* a starting workshop
+* a storage constraint
+* vertical danger
+* a correct death tone
+
+---
+
+# 12. Open Issues / Cleanup List
+
+## 1. Folder-Full Feedback
+
+When Dirt Pile is full and a tile clears, inventory stays capped, but the console/last-action feedback may not clearly say soil was wasted.
+
+Fix later.
+
+## 2. Death Screen Has No Restart
+
+This is acceptable for now.
+
+Later, a restart/load option will be needed.
+
+Do not add it until save/load or run restart rules are defined.
+
+## 3. Incidental 1-Tile Drops
+
+The test geometry has some incidental 1-tile drops.
+
+Not urgent.
+
+## 4. Disconnected Nook
+
+A small old nook became disconnected after spawn safety fixes.
+
+Acceptable for now.
+
+Could be cleaned during a starter-pocket polish pass.
+
+## 5. Procedural Generation Not Yet Started
+
+Not urgent.
+
+The project should probably do a larger handcrafted yard before true procedural generation.
+
+## 6. Digging Animation Not Yet Implemented
+
+This was discussed and intentionally deferred.
+
+Digging animation should be VS007 or later.
+
+---
+
+# 13. Recommended Next Versions
+
+## VS007 — Digging Animation / Action Feel
+
+Recommended next slice.
+
+Purpose:
+
+Make digging feel more alive without changing gameplay logic.
+
+Likely scope:
+
+* generate or prepare a simple digging animation
+* integrate it into current `WormAnimation`
+* play it only when the player digs
+* return to idle/move afterward
+* do not add new mechanics
+
+Important caution:
+
+This should be its own slice because it touches asset pipeline and animation logic.
+
+## VS008 — Larger Handcrafted Yard Test
+
+Before procedural generation, test a larger static world.
+
+Purpose:
+
+* see if scale feels right
+* test camera and movement over distance
+* test fall damage in larger terrain
+* test storage pressure over longer travel
+* introduce one surface-adjacent temptation
+
+No full procedural generation yet.
+
+## VS009 — First Procedural Starter-Yard Generator
+
+After VS008 proves the target feel, build a simple generator.
+
+Initial procedural requirements should be modest:
+
+* surface layer
+* underground dirt
+* starter workshop pocket
+* a few tunnels/nooks
+* rocks
+* one or two resource pockets
+* no complex biomes yet
+
+Do not jump straight to Terraria-scale generation.
+
+---
+
+# 14. Workflow Lessons Reinforced
+
+## DeepSeek Works For Micro-Edits
+
+The current workflow remains valid:
+
+1. ChatGPT designs and constrains the brief.
+2. DeepSeek/Ziva performs the narrow implementation.
+3. User playtests directly.
+4. ChatGPT audits report/screenshots.
+5. Commit only after human verification.
+
+## Split Risky Systems Into Parts
+
+VS006 proved that splitting risky systems works.
+
+If lethal fall damage had been implemented immediately, the worm would have died at spawn.
+
+The staged approach caught the geometry problem first.
+
+Use this same approach for future risky features:
+
+* procedural generation
+* crafting
+* equipment
+* storage
+* enemies
+* surface danger
+* save/load
+
+## Do Not Let Agents Improvise Architecture
+
+The brief style should remain:
+
+* exact files allowed
+* exact files forbidden
+* exact behavior required
+* explicit non-goals
+* reporting requirements
+* test instructions
+* no refactors unless requested
+
+This is especially important with DeepSeek.
+
+---
+
+# 15. Current Design Pillars Reinforced
+
+This thread reinforced several project pillars:
+
+## The Player Is Always A Worm
+
+The death text, fragility, and worm-scale worldview all strengthen this.
+
+## Technology Is Discovered, Not Unlocked
+
+Quantum Space Folder is not a research unlock.
+
+It is an existing invention constrained by material poverty.
+
+## Scale Is Progression
+
+The worm starts in a tiny workshop pocket.
+
+Long-term progression remains burrow → yard → ecosystem → planet → space.
+
+## Emergence Over Balance
+
+Fall damage, dirt placement, and storage constraints create situations the player can solve in multiple ways later.
+
+## Systems Over Content
+
+Fall damage and capacity are small systems that will support many future features.
+
+---
+
+# 16. Suggested Next Commit / Branch Hygiene
+
+After each future slice:
+
+1. `git status`
+2. check for junk files like `nul`
+3. explicitly add files if needed
+4. commit with slice name
+5. push
+6. keep progress summary updated
+
+Avoid `git add .` if Git reports strange untracked artifacts.
+
+---
+
+# 17. Likely Next Prompt Topic
+
+The strongest next discussion is VS007:
+
+Digging animation.
+
+Questions to resolve before implementation:
+
+1. What is the current worm animation script structure?
+2. Are left/right sprites separate textures?
+3. What frame size does the current worm use?
+4. Should the first dig animation support only left/right?
+5. How long should the dig animation play?
+6. Should it interrupt movement animation?
+7. Should up/down digging use a placeholder side animation for now?
+
+Recommended answer:
+
+Start with one side-facing digging animation and integrate it only for left/right digging. Use placeholder behavior for up/down.
+
+Do not attempt full directional animation yet.
+
+
+------
+
+Progress report 3 
+
+Thread Summary — VS007A Dig Animation and Commit Check
+
+This thread focused on getting VS007A: Procedural Dig Animation implemented, verified, and committed cleanly.
+
+1. We chose procedural animation over new Ludo art
+
+We reviewed the current WormPlayer and WormAnimation setup and decided Ziva/DeepSeek could handle the first digging animation pass.
+
+The reason: the existing animation system was simple and code-driven. WormAnimation already handled left/right crawl textures, frame cycling, and idle reset. That meant we could add a procedural lunge/squash animation without generating new sprite sheets.
+
+Decision:
+
+DeepSeek/Ziva handles VS007A
+Ludo waits until later, once the timing and feel are proven in-game
+No new art assets for this slice
+2. We wrote the VS007A implementation brief
+
+The brief defined a narrow procedural animation pass:
+
+Goal: make manual digging feel physical without changing gameplay.
+
+Required behavior:
+
+pressing Space triggers a visible dig motion
+worm lunges/compresses toward the facing direction
+left/right digging uses existing left/right textures
+up/down digging reuses horizontal texture but moves vertically
+animation temporarily overrides crawl/idle
+after the animation ends, sprite offset and scale return to normal
+no gameplay values change
+
+Allowed files:
+
+res://scripts/player/worm_animation.gd
+res://scripts/player/worm_player.gd
+
+Forbidden changes included:
+
+no world generation edits
+no tile durability changes
+no inventory/folder changes
+no fall damage changes
+no death screen changes
+no new assets
+no new UI
+no new input actions
+3. You uploaded the full project archive
+
+You uploaded:
+
+worm-craft.7z
+
+I checked whether I could actually open and inspect it.
+
+Result: yes.
+
+I confirmed the .7z extracted successfully and contained the readable Godot project files, scripts, scenes, assets, .git, and imports.
+
+That means the “zip the whole project/current assets folder and upload it” workflow works for code review, as long as the archive is accessible in the sandbox.
+
+4. I inspected the actual repo diff
+
+I checked the extracted project’s Git status and code changes.
+
+The relevant changes were exactly what we wanted:
+
+M scripts/player/worm_animation.gd
+M scripts/player/worm_player.gd
+
+The implementation added:
+
+procedural dig state
+play_dig(facing)
+dig animation priority over crawl/idle
+sprite lunge
+subtle squash/stretch
+base offset/scale restoration
+a call from WormPlayer._on_dig_input() into worm_animation.play_dig(facing_direction)
+
+No new art assets were added.
+
+No broad gameplay systems were changed.
+
+5. We found one unrelated Git issue
+
+The extracted Git status also showed:
+
+D readme.txt
+
+But the working folder had:
+
+README.txt
+
+So this looked like a Windows filename casing issue, not a VS007A change.
+
+I told you not to include that in the animation commit unless Git forced the issue.
+
+Recommended clean commit path was:
+
+git restore -- readme.txt
+git add scripts/player/worm_animation.gd scripts/player/worm_player.gd
+git commit -m "Add VS007A procedural worm dig animation"
+git push
+
+You said you did the first commit suggestion.
+
+6. We decided not to make a follow-on README commit unless needed
+
+You asked whether to do the second suggestion as a follow-on commit.
+
+Answer: no, unless git status still shows the README casing issue.
+
+The fallback command:
+
+git mv -f README.txt readme.txt
+git commit -m "Normalize README filename casing"
+git push
+
+was only for the case where Git still showed:
+
+deleted: readme.txt
+untracked: README.txt
+
+If the working tree is clean, leave README alone.
+
+Current Project State After This Thread
+
+VS007A is effectively complete and committed, assuming your push succeeded.
+
+The game now has:
+
+existing worm movement
+directional digging
+dirt placement
+Quantum Space Folder
+fall damage
+death screen
+target preview
+dig damage overlay
+flyout UI
+new procedural dig animation
+
+This was the right-sized slice. It improved action feel without expanding scope or introducing system debt.
+

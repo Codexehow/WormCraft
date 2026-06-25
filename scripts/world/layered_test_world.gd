@@ -27,12 +27,22 @@ var dirt_variant_by_cell: Dictionary = {}
 # Single texture for placed dirt (player-placed tiles)
 var placed_dirt_texture: Texture2D = null
 
+# Empty tunnel texture for dug-out underground spaces
+var empty_tunnel_texture: Texture2D = null
+
+# Spider silk texture for surface-adjacent prop
+var spider_silk_texture: Texture2D = null
+
 # Tile durability tracking for partially dug tiles
 # tile_durability[Vector2i] = remaining durability
 var tile_durability: Dictionary = {}
 
 # Workshop set-dressing props (non-interactive, visual only)
 var workshop_props: Array[Dictionary] = []
+
+# World props — non-interactive visual objects layered on top of terrain
+# Each entry: { "id": String, "type": String, "grid_pos": Vector2i, "size_tiles": Vector2i }
+var world_props: Array[Dictionary] = []
 
 # Reference to the player for target preview drawing
 var worm_player: WormPlayer = null
@@ -80,7 +90,10 @@ func _ready() -> void:
 	_initialize_layered_world()
 	_load_dirt_textures()
 	_load_placed_dirt_texture()
+	_load_empty_tunnel_texture()
+	_load_spider_silk_texture()
 	_initialize_workshop_props()
+	_initialize_world_props()
 
 	# Find the player for target preview
 	worm_player = get_tree().root.find_child("WormPlayer", true, false)
@@ -116,6 +129,26 @@ func _load_placed_dirt_texture() -> void:
 		placed_dirt_texture = null
 
 
+func _load_empty_tunnel_texture() -> void:
+	"""Load empty_tunnel.png texture for dug-out underground spaces."""
+	var texture: Texture2D = load("res://assets/tiles/empty_tunnel.png")
+	if texture and texture.get_width() == TILE_SIZE and texture.get_height() == TILE_SIZE:
+		empty_tunnel_texture = texture
+	else:
+		push_warning("empty_tunnel.png missing or wrong size. Falling back to debug color.")
+		empty_tunnel_texture = null
+
+
+func _load_spider_silk_texture() -> void:
+	"""Load silk.png texture for the spider silk world prop."""
+	var texture: Texture2D = load("res://assets/tiles/silk.png")
+	if texture and texture.get_width() == TILE_SIZE * 3 and texture.get_height() == TILE_SIZE:
+		spider_silk_texture = texture
+	else:
+		push_warning("silk.png missing or wrong size (expected 96x32). Falling back to placeholder.")
+		spider_silk_texture = null
+
+
 func _initialize_workshop_props() -> void:
 	"""Place non-interactive visual props in and near the starting pocket."""
 	workshop_props = [
@@ -140,6 +173,122 @@ func _initialize_workshop_props() -> void:
 			"grid_pos": Vector2i(52, 19),
 		},
 	]
+
+
+func _initialize_world_props() -> void:
+	"""Initialize non-interactive world props layered on top of terrain."""
+	world_props = [
+		{
+			"id": "spider_silk_01",
+			"type": "spider_silk",
+			"grid_pos": Vector2i(62, 11),
+			"size_tiles": Vector2i(3, 1),
+			"sampled": false,
+		},
+	]
+
+
+func _initialize_expanded_yard() -> void:
+	"""
+	Add a larger handcrafted yard/test area extending from the starter pocket.
+	
+	Provides:
+	- Rightward expansion from the workshop (wide tunnel at y=20)
+	- Staircase upward (worm steps RIGHT+UP at each step)
+	- Upper walkway (y=12) leading to a surface-adjacent cavity
+	- Spider silk prop in the cavity (y=11)
+	- Rock and dirt obstacles for terrain feel
+	
+	Staircase design:
+	  The worm walks right on y=20 until hitting a DIRT wall,
+	  then steps up-and-right to the next walkway level (y-1).
+	  Each level has a walkway 2+ tiles wide followed by a DIRT step trigger.
+	
+	Surface
+	 y=10  SSSSSSSSSSSSSSSSSSSSSSS  (surface grass)
+	 y=11  ..............EEEEEEEE   (cavity + silk)
+	 y=12  ..............EEEEEEEE   (upper walkway)
+	 y=13  .............D........
+	 y=14  ............D.........  (walkway)
+	 y=15  ...........D..........  (walkway)
+	 y=16  ..........D...........  (walkway)
+	 y=17  .........D............  (walkway)
+	 y=18  ........D.............  (walkway)
+	 y=19  .......D..............  (walkway)
+	 y=20  EEEEEEEEEEEEEEE       (right tunnel)
+			  (E=empty, D=dirt step-wall, .=untouched dirt)
+	"""
+	var cavity_x := 62  # Spider silk cavity center x
+	var tunnel_end := 68  # Rightward tunnel end x
+	
+	# --- Remove the old rock blockage at x=57 ---
+	tile_grid[19][57] = TileType.EMPTY
+	tile_grid[20][57] = TileType.EMPTY
+	
+	# --- Rightward expansion from the workshop (y=20) ---
+	_carve_h_tunnel(20, 57, tunnel_end)
+	
+	# --- Rightward+upward staircase (always stepping RIGHT) ---
+	# Each step n (0..6): walk right on walkway at y=20-n from x=52+n to x=56+n
+	#                      then bump into DIRT at (57+n, 20-n), step to (57+n, 19-n)
+	#                      next walkway is at y-1
+	#
+	# Conditions checked per step:
+	#   target_same_level = (57+n, 20-n) = DIRT
+	#   step_target        = (57+n, 19-n) = EMPTY
+	#   above_current      = (56+n, 19-n) = EMPTY
+	#   below_current      = (56+n, 21-n) = DIRT (original world below)
+	
+	for step_n in range(7):
+		var walkway_y: int = 20 - step_n
+		var trigger_x: int = 57 + step_n
+		
+		# Walkway: worm walks right on this level
+		_carve_h_tunnel(walkway_y, 52 + step_n, 56 + step_n)
+		
+		# Step trigger wall (DIRT) — worm bumps into this
+		tile_grid[walkway_y][trigger_x] = TileType.DIRT
+		
+		# Step destination (EMPTY) — worm lands here
+		tile_grid[walkway_y - 1][trigger_x] = TileType.EMPTY
+		
+		# Headroom above worm's current position (EMPTY)
+		tile_grid[walkway_y - 1][trigger_x - 1] = TileType.EMPTY
+	
+	# After step 6, worm arrives at (63, 13).
+	# Final walkway at y=13 going left (but worm is pressing RIGHT, so we need
+	# another step-right trigger)
+	
+	# Step 7: from (63,13) → bump (64,13)=DIRT → step to (64,12)
+	tile_grid[13][64] = TileType.DIRT
+	tile_grid[12][64] = TileType.EMPTY
+	tile_grid[12][63] = TileType.EMPTY
+	
+	# Upper walkway at y=12 from x=52 to x=64
+	_carve_h_tunnel(12, 52, 64)
+	
+	# Surface-adjacent cavity at y=11 for spider silk
+	_carve_h_tunnel(11, cavity_x, cavity_x + 2)
+	
+	# Ensure solid floor below the cavity
+	for x in range(cavity_x, cavity_x + 3):
+		tile_grid[13][x] = TileType.DIRT
+	
+	# Solid wall right of the cavity
+	tile_grid[12][cavity_x + 3] = TileType.DIRT
+	tile_grid[11][cavity_x + 3] = TileType.DIRT
+	
+	# Rock obstacle on upper walkway
+	tile_grid[12][58] = TileType.ROCK
+	
+	# Tunnel rock for visual variety
+	tile_grid[19][63] = TileType.ROCK
+	tile_grid[20][65] = TileType.DIRT
+	
+	# Small drop at the far right of the tunnel
+	tile_grid[21][tunnel_end] = TileType.EMPTY
+	tile_grid[22][tunnel_end] = TileType.EMPTY
+	tile_grid[23][tunnel_end] = TileType.DIRT  # Landing
 
 
 func _get_dirt_texture_for_cell(grid_position: Vector2i) -> Texture2D:
@@ -237,6 +386,9 @@ func _initialize_starter_layout() -> void:
 
 	# Add fall test geometry to the left of the pocket
 	_carve_fall_test_geometry()
+
+	# Add larger handcrafted yard/test area to the right and upward
+	_initialize_expanded_yard()
 
 
 func _carve_fall_test_geometry() -> void:
@@ -353,7 +505,9 @@ func _draw() -> void:
 			var rect_pos: Vector2 = Vector2(x * TILE_SIZE, y * TILE_SIZE)
 			var rect: Rect2 = Rect2(rect_pos, Vector2(TILE_SIZE, TILE_SIZE))
 			
-			if tile_type == TileType.DIRT:
+			if tile_type == TileType.EMPTY and empty_tunnel_texture:
+				draw_texture_rect(empty_tunnel_texture, rect, false)
+			elif tile_type == TileType.DIRT:
 				var dirt_texture: Texture2D = _get_dirt_texture_for_cell(Vector2i(x, y))
 				if dirt_texture:
 					draw_texture_rect(dirt_texture, rect, false)
@@ -368,6 +522,9 @@ func _draw() -> void:
 			# Subtle border for visual clarity
 			draw_rect(rect, border_color, false, 1.0)
 
+	# Draw world props (spider silk, etc.) on top of terrain
+	_draw_world_props()
+
 	# Draw dig damage overlays over partially-dug tiles
 	for damaged_pos: Vector2i in tile_durability.keys():
 		if not is_in_bounds(damaged_pos):
@@ -375,7 +532,7 @@ func _draw() -> void:
 		var tile_type: int = get_tile_type(damaged_pos)
 		_draw_dig_damage_overlay(damaged_pos, tile_type)
 
-	# Draw workshop set-dressing props on top of terrain
+	# Draw workshop set-dressing props on top of terrain and damage
 	_draw_workshop_props()
 
 	# Draw target preview overlays on top of terrain and damage marks (only when toggled on)
@@ -559,12 +716,178 @@ func try_eat_tile(grid_position: Vector2i) -> Dictionary:
 	"""
 	return try_dig_tile(grid_position)
 
+func try_interact_prop_at(grid_pos: Vector2i) -> Dictionary:
+	"""
+	Attempt to interact with a world prop at the given grid position.
+	
+	Returns a dictionary with:
+	- success: bool
+	- prop_type: String (e.g. "spider_silk")
+	- message: String
+	- resource_id: String
+	- resource_amount: int
+	- effect_world_pos: Vector2 (world position for particle effects)
+	"""
+	for prop in world_props:
+		var prop_grid_pos: Vector2i = prop["grid_pos"]
+		var prop_size: Vector2i = prop.get("size_tiles", Vector2i(1, 1))
+		var is_targeting_this_prop: bool = false
+
+		# Check if the given grid position overlaps any tile this prop occupies
+		for dx in range(prop_size.x):
+			for dy in range(prop_size.y):
+				if Vector2i(prop_grid_pos.x + dx, prop_grid_pos.y + dy) == grid_pos:
+					is_targeting_this_prop = true
+					break
+			if is_targeting_this_prop:
+				break
+
+		if not is_targeting_this_prop:
+			continue
+
+		# Calculate a reasonable effect position (center of the prop)
+		var effect_pos: Vector2 = grid_to_world_center(prop_grid_pos) + Vector2(TILE_SIZE * prop_size.x / 2.0, 0.0)
+
+		match prop["type"]:
+			"spider_silk":
+				if prop.get("sampled", false):
+					return {
+						"success": false,
+						"prop_type": "spider_silk",
+						"message": "Spider silk already sampled.",
+						"resource_id": "",
+						"resource_amount": 0,
+						"effect_world_pos": effect_pos,
+					}
+				else:
+					prop["sampled"] = true
+					return {
+						"success": true,
+						"prop_type": "spider_silk",
+						"message": "Sampled spider silk.",
+						"resource_id": "spider_silk_sample",
+						"resource_amount": 1,
+						"effect_world_pos": effect_pos,
+					}
+
+	# No prop found at this grid position
+	return {
+		"success": false,
+		"prop_type": "",
+		"message": "Nothing to inspect.",
+		"resource_id": "",
+		"resource_amount": 0,
+		"effect_world_pos": Vector2.ZERO,
+	}
+
+
+func try_interact_prop_near(center_pos: Vector2i, radius: int = 1) -> Dictionary:
+	"""
+	Try to interact with a prop near the given center position.
+	Checks all tiles within Manhattan distance <= radius of the center_pos.
+	
+	First checks the exact center position, then expands outward.
+	"""
+	# First, try the exact position
+	var exact_result: Dictionary = try_interact_prop_at(center_pos)
+	if exact_result["success"]:
+		return exact_result
+	
+	# Fallback: check nearby positions within Manhattan distance radius
+	# Order: try positions closer to center first
+	for dist in range(1, radius + 1):
+		for dx in range(-dist, dist + 1):
+			var dy_remainder: int = dist - abs(dx)
+			for dy_sign in [1, -1]:
+				var dy: int = dy_remainder * dy_sign
+				if dx == 0 and dy == 0:
+					continue
+				# Skip positions already checked at smaller distances
+				if abs(dx) + abs(dy) != dist:
+					continue
+				var check_pos: Vector2i = Vector2i(center_pos.x + dx, center_pos.y + dy)
+				if not is_in_bounds(check_pos):
+					continue
+				var result: Dictionary = try_interact_prop_at(check_pos)
+				if result["success"]:
+					return result
+	
+	# Also check the worm's current position
+	var worm_grid_pos: Vector2i = world_to_grid(worm_player.global_position) if worm_player else Vector2i.ZERO
+	if worm_grid_pos != center_pos:
+		var worm_tile_result: Dictionary = try_interact_prop_at(worm_grid_pos)
+		if worm_tile_result["success"]:
+			return worm_tile_result
+	
+	# No prop found anywhere in range — return the exact position result (which will be "Nothing to inspect.")
+	return exact_result
+
+
+func _spawn_scan_particles_at(world_pos: Vector2) -> void:
+	"""Spawn a short one-shot particle burst at the given world position for scan feedback."""
+	var particles := CPUParticles2D.new()
+	particles.position = world_pos
+	particles.z_as_relative = false
+	particles.z_index = 100  # Render above terrain and props
+
+	# Time settings: short burst
+	particles.amount = 16
+	particles.lifetime = 0.6
+	particles.one_shot = true
+	particles.explosiveness = 1.0
+	particles.randomness = 0.3
+
+	# Direction: burst outward in all directions
+	particles.direction = Vector2.ZERO
+	particles.spread = 180.0
+	particles.initial_velocity_min = 30.0
+	particles.initial_velocity_max = 60.0
+
+	# Scale: small motes
+	particles.scale_amount_min = 1.0
+	particles.scale_amount_max = 2.5
+
+	# Color: pale blue-white
+	particles.color = Color(0.85, 0.9, 1.0, 0.9)
+
+	# No gravity
+	particles.gravity = Vector2.ZERO
+
+	# Start emitting
+	particles.emitting = true
+	add_child(particles)
+
+	# Auto-cleanup after particles finish their lifetime
+	await get_tree().create_timer(particles.lifetime + 0.3).timeout
+	if is_instance_valid(particles):
+		particles.queue_free()
+
+
 # Regrowth disabled - cleared tiles remain cleared.
 # func _update_regrowth_timers(delta: float) -> void:
 # 	Cleared soil stays cleared in current implementation.
 
 # ---------------------------------------------------------------------------
 # Workshop set-dressing props — non-interactive visual-only decorations
+# ---------------------------------------------------------------------------
+
+func _draw_world_props() -> void:
+	"""Draw world props (spider silk, etc.) on top of terrain using textures."""
+	for prop in world_props:
+		var grid_pos: Vector2i = prop["grid_pos"]
+		var size_tiles: Vector2i = prop.get("size_tiles", Vector2i(1, 1))
+		var pixel_pos: Vector2 = grid_to_world(grid_pos)
+		var rect: Rect2 = Rect2(pixel_pos, Vector2(TILE_SIZE * size_tiles.x, TILE_SIZE * size_tiles.y))
+
+		match prop["type"]:
+			"spider_silk":
+				if spider_silk_texture:
+					draw_texture_rect(spider_silk_texture, rect, false)
+				else:
+					# Fallback: semi-transparent white rectangle
+					draw_rect(rect, Color(0.9, 0.85, 0.7, 0.4))
+
+
 # ---------------------------------------------------------------------------
 
 func _draw_workshop_props() -> void:
