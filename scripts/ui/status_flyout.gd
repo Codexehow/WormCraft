@@ -76,6 +76,7 @@ func _update_panel() -> void:
 	var tile_type_text: String = worm_player.get_tile_type_name()
 	var facing_text: String = worm_player.get_facing_direction_name()
 	var dirt_pile: int = worm_player.get_inventory_count("dirt_pile")
+	var dirt_capacity: int = worm_player.get_inventory_capacity("dirt_pile")
 	
 	var panel_text: String = """STATUS
 
@@ -84,9 +85,9 @@ State: %s
 Current Tile: %s
 Facing: %s
 Dirt Dug: %d
-Dirt Pile: %d
+Dirt Pile: %d / %d
 Last: %s
-""" % [hunger_text, status_text, tile_type_text, facing_text, worm_player.dirt_dug_count, dirt_pile, worm_player.last_action]
+""" % [hunger_text, status_text, tile_type_text, facing_text, worm_player.dirt_dug_count, dirt_pile, dirt_capacity, worm_player.last_action]
 	
 	label.text = panel_text
 	

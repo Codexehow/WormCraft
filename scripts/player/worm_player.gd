@@ -16,6 +16,9 @@ const STEP_COOLDOWN_SECONDS: float = 0.16
 # Placement constants
 const DIRT_PILE_PLACE_COST: int = 1
 
+# Quantum Space Folder capacity
+const DIRT_PILE_CAPACITY: int = 30
+
 # Inventory
 var inventory: Dictionary = {
 	"dirt_pile": 0
@@ -63,6 +66,9 @@ func _ready() -> void:
 	worm_animation = WormAnimation.new()
 	add_child(worm_animation)
 	worm_animation._ready()
+
+	# Opening mood line — the worm has been here for decades
+	last_action = "Still here. Still the only one."
 
 	# Initialize hunger
 	hunger = STARTING_HUNGER
@@ -274,9 +280,16 @@ func _on_dig_input() -> void:
 	
 	if result["success"] and result["cleared"]:
 		if result["resource_id"] == "dirt_pile":
-			inventory["dirt_pile"] += result["resource_amount"]
+			var amount: int = result["resource_amount"]
+			var added: int = _add_inventory_item("dirt_pile", amount)
 			dirt_dug_count += 1
-			emit_signal("inventory_changed", inventory)
+
+			if added < amount:
+				var wasted: int = amount - added
+				if added > 0:
+					last_action = "Folder full. Added %d, wasted %d soil." % [added, wasted]
+				else:
+					last_action = "Folder full. Soil wasted."
 	
 	print(result["message"])
 
@@ -332,6 +345,22 @@ func _on_eat_food_input() -> void:
 	emit_signal("hunger_changed", hunger)
 	print("Ate dirt from pile. Hunger: %.0f" % hunger)
 
+func _add_inventory_item(item_id: String, amount: int) -> int:
+	"""Add items to inventory respecting Quantum Space Folder capacity. Returns amount actually added."""
+	if item_id == "dirt_pile":
+		var current_amount: int = inventory.get("dirt_pile", 0)
+		var available_space: int = max(DIRT_PILE_CAPACITY - current_amount, 0)
+		var amount_added: int = min(amount, available_space)
+		inventory["dirt_pile"] = current_amount + amount_added
+		emit_signal("inventory_changed", inventory)
+		return amount_added
+
+	# Non-capacity items — add freely
+	inventory[item_id] = inventory.get(item_id, 0) + amount
+	emit_signal("inventory_changed", inventory)
+	return amount
+
+
 func _update_current_tile() -> void:
 	if world:
 		var grid_pos: Vector2i = world.world_to_grid(global_position)
@@ -370,6 +399,12 @@ func get_tile_type_name() -> String:
 func get_inventory_count(item_id: String) -> int:
 	"""Get count of an inventory item."""
 	return inventory.get(item_id, 0)
+
+func get_inventory_capacity(item_id: String) -> int:
+	"""Get max capacity for a capacity-limited inventory item."""
+	if item_id == "dirt_pile":
+		return DIRT_PILE_CAPACITY
+	return -1
 
 func get_dig_target_grid_pos() -> Vector2i:
 	"""Public wrapper: returns the grid position of the tile that would be dug."""

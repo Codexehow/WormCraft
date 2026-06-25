@@ -31,6 +31,9 @@ var placed_dirt_texture: Texture2D = null
 # tile_durability[Vector2i] = remaining durability
 var tile_durability: Dictionary = {}
 
+# Workshop set-dressing props (non-interactive, visual only)
+var workshop_props: Array[Dictionary] = []
+
 # Reference to the player for target preview drawing
 var worm_player: WormPlayer = null
 
@@ -74,6 +77,7 @@ func _ready() -> void:
 	_initialize_layered_world()
 	_load_dirt_textures()
 	_load_placed_dirt_texture()
+	_initialize_workshop_props()
 
 	# Find the player for target preview
 	worm_player = get_tree().root.find_child("WormPlayer", true, false)
@@ -107,6 +111,32 @@ func _load_placed_dirt_texture() -> void:
 	else:
 		push_warning("placed_dirt.png missing or wrong size. Falling back to debug color.")
 		placed_dirt_texture = null
+
+
+func _initialize_workshop_props() -> void:
+	"""Place non-interactive visual props in and near the starting pocket."""
+	workshop_props = [
+		{
+			"id": "dead_machine",
+			"grid_pos": Vector2i(46, 19),
+		},
+		{
+			"id": "wall_hooks",
+			"grid_pos": Vector2i(50, 18),
+		},
+		{
+			"id": "child_relic",
+			"grid_pos": Vector2i(44, 23),
+		},
+		{
+			"id": "quantum_folder_anchor",
+			"grid_pos": Vector2i(48, 22),
+		},
+		{
+			"id": "broken_satchel",
+			"grid_pos": Vector2i(52, 19),
+		},
+	]
 
 
 func _get_dirt_texture_for_cell(grid_position: Vector2i) -> Texture2D:
@@ -165,15 +195,68 @@ func _initialize_layered_world() -> void:
 	tile_grid[35][15] = TileType.ROCK
 	tile_grid[40][60] = TileType.ROCK
 	
-	# Create initial empty tunnel pocket where worm starts
-	var start_x: int = 48
-	var start_y: int = 20
-	for dy in range(-2, 3):
-		for dx in range(-2, 3):
-			var x: int = start_x + dx
-			var y: int = start_y + dy
-			if is_in_bounds(Vector2i(x, y)):
+	# Create organic starting pocket and handcrafted starter layout
+	_initialize_starter_layout()
+
+func _initialize_starter_layout() -> void:
+	"""Replace the old debug square pocket with an organic handcrafted starter burrow."""
+	var start_pos := Vector2i(48, 20)
+
+	# Main organic workshop pocket (oval, wider than tall)
+	_carve_oval_pocket(start_pos, 5, 3)
+
+	# Short left tunnel
+	_carve_h_tunnel(20, 41, 45)
+
+	# Short right tunnel
+	_carve_h_tunnel(20, 51, 56)
+
+	# Small downward nook (lower workshop area)
+	_carve_v_tunnel(45, 20, 23)
+	_carve_oval_pocket(Vector2i(45, 24), 2, 1)
+
+	# Upward tunnel stub — hints at surface but does NOT reach it
+	_carve_v_tunnel(52, 17, 20)
+
+	# Rock blockage — suggests the worm tried to dig further right but hit hard rock
+	tile_grid[20][57] = TileType.ROCK
+	tile_grid[19][57] = TileType.ROCK
+
+
+func _carve_oval_pocket(center: Vector2i, radius_x: int, radius_y: int) -> void:
+	"""Carve an elliptical empty pocket into the tile grid."""
+	for y in range(center.y - radius_y, center.y + radius_y + 1):
+		for x in range(center.x - radius_x, center.x + radius_x + 1):
+			var pos := Vector2i(x, y)
+			if not is_in_bounds(pos):
+				continue
+
+			var nx: float = float(x - center.x) / float(radius_x)
+			var ny: float = float(y - center.y) / float(radius_y)
+
+			if nx * nx + ny * ny <= 1.0:
 				tile_grid[y][x] = TileType.EMPTY
+
+
+func _carve_h_tunnel(y: int, x1: int, x2: int) -> void:
+	"""Carve a horizontal tunnel at a fixed y row between x1 and x2 (inclusive)."""
+	var min_x: int = min(x1, x2)
+	var max_x: int = max(x1, x2)
+	for x in range(min_x, max_x + 1):
+		var pos := Vector2i(x, y)
+		if is_in_bounds(pos):
+			tile_grid[y][x] = TileType.EMPTY
+
+
+func _carve_v_tunnel(x: int, y1: int, y2: int) -> void:
+	"""Carve a vertical tunnel at a fixed x column between y1 and y2 (inclusive)."""
+	var min_y: int = min(y1, y2)
+	var max_y: int = max(y1, y2)
+	for y in range(min_y, max_y + 1):
+		var pos := Vector2i(x, y)
+		if is_in_bounds(pos):
+			tile_grid[y][x] = TileType.EMPTY
+
 
 func _draw() -> void:
 	"""Render all tiles directly from tile_grid — single source of truth."""
@@ -204,6 +287,9 @@ func _draw() -> void:
 			continue
 		var tile_type: int = get_tile_type(damaged_pos)
 		_draw_dig_damage_overlay(damaged_pos, tile_type)
+
+	# Draw workshop set-dressing props on top of terrain
+	_draw_workshop_props()
 
 	# Draw target preview overlays on top of terrain and damage marks (only when toggled on)
 	if show_target_preview:
@@ -389,6 +475,41 @@ func try_eat_tile(grid_position: Vector2i) -> Dictionary:
 # Regrowth disabled - cleared tiles remain cleared.
 # func _update_regrowth_timers(delta: float) -> void:
 # 	Cleared soil stays cleared in current implementation.
+
+# ---------------------------------------------------------------------------
+# Workshop set-dressing props — non-interactive visual-only decorations
+# ---------------------------------------------------------------------------
+
+func _draw_workshop_props() -> void:
+	"""Draw placeholder shapes for workshop props. These do not affect gameplay."""
+	for prop in workshop_props:
+		var grid_pos: Vector2i = prop["grid_pos"]
+		var rect_pos: Vector2 = grid_to_world(grid_pos)
+
+		match prop["id"]:
+			"dead_machine":
+				# Muted metal-gray body with a blue-ish display panel
+				draw_rect(Rect2(rect_pos + Vector2(4, 8), Vector2(24, 12)), Color.html("#555566"))
+				draw_rect(Rect2(rect_pos + Vector2(8, 4), Vector2(8, 8)), Color.html("#88aaff"))
+			"wall_hooks":
+				# Two pale bone/off-white hooks on the wall
+				draw_line(rect_pos + Vector2(6, 6), rect_pos + Vector2(6, 18), Color.html("#ddddaa"), 2.0)
+				draw_line(rect_pos + Vector2(16, 6), rect_pos + Vector2(16, 18), Color.html("#ddddaa"), 2.0)
+				draw_line(rect_pos + Vector2(24, 6), rect_pos + Vector2(24, 18), Color.html("#ddddaa"), 2.0)
+			"child_relic":
+				# Bright red plastic-like circle — a relic from the worm's early years
+				draw_circle(rect_pos + Vector2(16, 16), 6.0, Color.html("#cc4444"))
+				draw_circle(rect_pos + Vector2(16, 16), 4.0, Color.html("#ff6666"))
+			"quantum_folder_anchor":
+				# Purple/cyan glow — anchor point for the Quantum Space Folder
+				draw_rect(Rect2(rect_pos + Vector2(8, 8), Vector2(16, 16)), Color.html("#8844cc"))
+				draw_rect(Rect2(rect_pos + Vector2(11, 11), Vector2(10, 10)), Color.html("#66ccff"))
+			"broken_satchel":
+				# A torn leather-like satchel shape
+				draw_rect(Rect2(rect_pos + Vector2(6, 8), Vector2(20, 14)), Color.html("#8B6914"))
+				draw_line(rect_pos + Vector2(10, 8), rect_pos + Vector2(10, 4), Color.html("#6B4910"), 2.0)
+				draw_line(rect_pos + Vector2(22, 8), rect_pos + Vector2(22, 4), Color.html("#6B4910"), 2.0)
+
 
 # ---------------------------------------------------------------------------
 # Dig damage overlay — procedural crack lines on partially-dug tiles
