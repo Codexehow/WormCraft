@@ -370,3 +370,11 @@ func get_tile_type_name() -> String:
 func get_inventory_count(item_id: String) -> int:
 	"""Get count of an inventory item."""
 	return inventory.get(item_id, 0)
+
+func get_dig_target_grid_pos() -> Vector2i:
+	"""Public wrapper: returns the grid position of the tile that would be dug."""
+	return _get_dig_target_grid_pos()
+
+func get_place_target_grid_pos() -> Vector2i:
+	"""Public wrapper: returns the grid position of the tile where dirt would be placed."""
+	return _get_target_grid_pos()

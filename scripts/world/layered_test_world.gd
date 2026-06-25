@@ -19,19 +19,36 @@ const WORLD_HEIGHT: int = 54
 # Grid of tile types
 var tile_grid: Array = []
 
-# Cached dirt texture for _draw() rendering
-var _dirt_texture: Texture2D = null
+# Array of dirt texture variants for visual variety
+var dirt_textures: Array[Texture2D] = []
+# Per-cell stable variant index cache (deterministic, not randomized)
+var dirt_variant_by_cell: Dictionary = {}
+
+# Single texture for placed dirt (player-placed tiles)
+var placed_dirt_texture: Texture2D = null
 
 # Tile durability tracking for partially dug tiles
 # tile_durability[Vector2i] = remaining durability
 var tile_durability: Dictionary = {}
 
+# Reference to the player for target preview drawing
+var worm_player: WormPlayer = null
+
+# Target preview toggle state (default: off for clean-screen feel)
+var show_target_preview: bool = false
+var _raw_target_preview_key_was_down: bool = false
+
 # (removed: dirt uses a single atlas tile now)
 
 # Durability values for diggable tiles
-const DIRT_MAX_DURABILITY: int = 8
-const SURFACE_MAX_DURABILITY: int = 8
+const DIRT_MAX_DURABILITY: int = 24
+const SURFACE_MAX_DURABILITY: int = 24
 const PLACED_DIRT_MAX_DURABILITY: int = 4
+
+# Target preview colors
+const DIG_VALID_COLOR := Color(1.0, 0.75, 0.15, 0.95)
+const PLACE_VALID_COLOR := Color(0.2, 0.8, 1.0, 0.95)
+const INVALID_TARGET_COLOR := Color(1.0, 0.15, 0.15, 0.85)
 
 # Resource output when tiles are cleared
 const DIRT_PILE_PER_DIRT_TILE: int = 5
@@ -55,12 +72,68 @@ var border_color: Color = Color.html("#6B4910")
 
 func _ready() -> void:
 	_initialize_layered_world()
-	# Load dirt texture for _draw() rendering (null if missing — safe fallback)
-	_dirt_texture = load("res://assets/tiles/dirt.png")
+	_load_dirt_textures()
+	_load_placed_dirt_texture()
+
+	# Find the player for target preview
+	worm_player = get_tree().root.find_child("WormPlayer", true, false)
+
 	queue_redraw()
 
+func _load_dirt_textures() -> void:
+	"""Load all dirt texture variants for visual variety in rendering."""
+	dirt_textures.clear()
+	dirt_variant_by_cell.clear()
+
+	var paths: Array[String] = [
+		"res://assets/tiles/dirt.png",
+		"res://assets/tiles/dirt2.png",
+		"res://assets/tiles/dirt3.png"
+	]
+
+	for path in paths:
+		var texture: Texture2D = load(path)
+		if texture:
+			dirt_textures.append(texture)
+		else:
+			push_warning("Missing dirt texture: " + path)
+
+
+func _load_placed_dirt_texture() -> void:
+	"""Load placed_dirt.png texture with size validation."""
+	var texture: Texture2D = load("res://assets/tiles/placed_dirt.png")
+	if texture and texture.get_width() == TILE_SIZE and texture.get_height() == TILE_SIZE:
+		placed_dirt_texture = texture
+	else:
+		push_warning("placed_dirt.png missing or wrong size. Falling back to debug color.")
+		placed_dirt_texture = null
+
+
+func _get_dirt_texture_for_cell(grid_position: Vector2i) -> Texture2D:
+	"""Return a stable, deterministic dirt texture variant for the given grid cell."""
+	if dirt_textures.is_empty():
+		return null
+
+	if not dirt_variant_by_cell.has(grid_position):
+		# Stable deterministic variation using prime number hashing.
+		# Do NOT use randi() — the result must be reproducible per cell.
+		var index: int = abs((grid_position.x * 73856093) ^ (grid_position.y * 19349663)) % dirt_textures.size()
+		dirt_variant_by_cell[grid_position] = index
+
+	return dirt_textures[dirt_variant_by_cell[grid_position]]
+
+
 func _process(_delta: float) -> void:
-	pass
+	# Toggle target preview with Q key (edge-triggered, raw fallback)
+	var raw_q_down: bool = Input.is_key_pressed(KEY_Q)
+	if raw_q_down and not _raw_target_preview_key_was_down:
+		show_target_preview = not show_target_preview
+		print("Target preview enabled." if show_target_preview else "Target preview disabled.")
+		queue_redraw()
+	_raw_target_preview_key_was_down = raw_q_down
+
+	# Redraw each frame so target preview follows player movement and facing changes
+	queue_redraw()
 
 func _initialize_layered_world() -> void:
 	# Create empty 2D grid
@@ -110,14 +183,31 @@ func _draw() -> void:
 			var rect_pos: Vector2 = Vector2(x * TILE_SIZE, y * TILE_SIZE)
 			var rect: Rect2 = Rect2(rect_pos, Vector2(TILE_SIZE, TILE_SIZE))
 			
-			if tile_type == TileType.DIRT and _dirt_texture:
-				draw_texture_rect(_dirt_texture, rect, false)
+			if tile_type == TileType.DIRT:
+				var dirt_texture: Texture2D = _get_dirt_texture_for_cell(Vector2i(x, y))
+				if dirt_texture:
+					draw_texture_rect(dirt_texture, rect, false)
+				else:
+					draw_rect(rect, tile_colors.get(tile_type, Color.WHITE))
+			elif tile_type == TileType.PLACED_DIRT and placed_dirt_texture:
+				draw_texture_rect(placed_dirt_texture, rect, false)
 			else:
 				var tile_color: Color = tile_colors.get(tile_type, Color.WHITE)
 				draw_rect(rect, tile_color)
 			
 			# Subtle border for visual clarity
 			draw_rect(rect, border_color, false, 1.0)
+
+	# Draw dig damage overlays over partially-dug tiles
+	for damaged_pos: Vector2i in tile_durability.keys():
+		if not is_in_bounds(damaged_pos):
+			continue
+		var tile_type: int = get_tile_type(damaged_pos)
+		_draw_dig_damage_overlay(damaged_pos, tile_type)
+
+	# Draw target preview overlays on top of terrain and damage marks (only when toggled on)
+	if show_target_preview:
+		_draw_target_preview()
 
 # World query API
 func world_to_grid(world_position: Vector2) -> Vector2i:
@@ -254,6 +344,7 @@ func _dig_solid_tile(
 	if current_durability <= 0:
 		tile_grid[grid_position.y][grid_position.x] = TileType.EMPTY
 		tile_durability.erase(grid_position)
+		dirt_variant_by_cell.erase(grid_position)
 		queue_redraw()
 		return _dig_result(true, true, "Cleared %s tile!" % tile_label, tile_type, "dirt_pile", resource_amount, max_durability, max_durability)
 	
@@ -298,6 +389,123 @@ func try_eat_tile(grid_position: Vector2i) -> Dictionary:
 # Regrowth disabled - cleared tiles remain cleared.
 # func _update_regrowth_timers(delta: float) -> void:
 # 	Cleared soil stays cleared in current implementation.
+
+# ---------------------------------------------------------------------------
+# Dig damage overlay — procedural crack lines on partially-dug tiles
+# ---------------------------------------------------------------------------
+
+func _draw_dig_damage_overlay(grid_position: Vector2i, tile_type: int) -> void:
+	"""Draw crack marks proportional to damage taken on a partially-dug tile."""
+	if not tile_durability.has(grid_position):
+		return
+
+	var max_durability: int
+	match tile_type:
+		TileType.DIRT:
+			max_durability = DIRT_MAX_DURABILITY
+		TileType.SURFACE:
+			max_durability = SURFACE_MAX_DURABILITY
+		TileType.PLACED_DIRT:
+			max_durability = PLACED_DIRT_MAX_DURABILITY
+		_:
+			return
+
+	var remaining_durability: int = tile_durability[grid_position]
+	var damage: int = max_durability - remaining_durability
+	var damage_ratio: float = float(damage) / float(max_durability)
+
+	var rect_pos: Vector2 = Vector2(grid_position.x * TILE_SIZE, grid_position.y * TILE_SIZE)
+	var crack_color: Color = Color(0.08, 0.04, 0.02, 0.95)
+	var highlight_color: Color = Color(0.75, 0.45, 0.20, 0.5)
+
+	# Deterministic position jitter per cell so different tiles look different
+	var hash_val: int = abs(grid_position.x * 73856093 ^ grid_position.y * 19349663)
+	var jitter: int = hash_val % 7
+
+	# Level 1 — single subtle crack (any damage)
+	draw_line(
+		rect_pos + Vector2(8 + jitter, 10),
+		rect_pos + Vector2(14 + jitter, 14),
+		crack_color, 2.0
+	)
+
+	if damage_ratio >= 0.25:
+		# Level 2 — second crack
+		draw_line(
+			rect_pos + Vector2(18 - jitter, 8),
+			rect_pos + Vector2(23 - jitter, 13),
+			crack_color, 2.0
+		)
+
+	if damage_ratio >= 0.50:
+		# Level 3 — third crack
+		draw_line(
+			rect_pos + Vector2(10, 22 - jitter),
+			rect_pos + Vector2(17, 18 - jitter),
+			crack_color, 2.0
+		)
+
+	if damage_ratio >= 0.75:
+		# Level 4 — fourth crack
+		draw_line(
+			rect_pos + Vector2(22, 22 + jitter),
+			rect_pos + Vector2(27, 18 + jitter),
+			highlight_color, 2.0
+		)
+
+	if damage_ratio >= 0.90:
+		# Level 5 — near-breaking highlight crack
+		draw_line(
+			rect_pos + Vector2(5, 16 + jitter),
+			rect_pos + Vector2(12, 16 + jitter),
+			highlight_color, 3.0
+		)
+
+
+# ---------------------------------------------------------------------------
+# Target preview drawing — procedural outlines over dig/place targets
+# ---------------------------------------------------------------------------
+
+func _draw_target_preview() -> void:
+	"""Draw outline rectangles over the dig and place target tiles."""
+	if not worm_player:
+		return
+
+	var dig_pos: Vector2i = worm_player.get_dig_target_grid_pos()
+	var place_pos: Vector2i = worm_player.get_place_target_grid_pos()
+
+	_draw_target_rect(dig_pos, _get_dig_preview_color(dig_pos), 3.0)
+
+	if place_pos != dig_pos:
+		_draw_target_rect(place_pos, _get_place_preview_color(place_pos), 2.0)
+	else:
+		# Both targets on the same tile — draw a thinner second outline
+		_draw_target_rect(place_pos, _get_place_preview_color(place_pos), 1.0)
+
+
+func _draw_target_rect(grid_position: Vector2i, color: Color, width: float) -> void:
+	"""Draw a single tile-sized rectangle outline at the given grid position."""
+	if not is_in_bounds(grid_position):
+		return
+
+	var rect_pos: Vector2 = Vector2(grid_position.x * TILE_SIZE, grid_position.y * TILE_SIZE)
+	var rect: Rect2 = Rect2(rect_pos, Vector2(TILE_SIZE, TILE_SIZE))
+	draw_rect(rect, color, false, width)
+
+
+func _get_dig_preview_color(grid_position: Vector2i) -> Color:
+	"""Return valid dig color if the tile can be dug, otherwise invalid color."""
+	if is_in_bounds(grid_position) and is_diggable(grid_position):
+		return DIG_VALID_COLOR
+	return INVALID_TARGET_COLOR
+
+
+func _get_place_preview_color(grid_position: Vector2i) -> Color:
+	"""Return valid place color if the tile can receive dirt, otherwise invalid color."""
+	if is_in_bounds(grid_position) and is_placeable(grid_position):
+		return PLACE_VALID_COLOR
+	return INVALID_TARGET_COLOR
+
 
 func get_tile_type_name(tile_type: int) -> String:
 	match tile_type:
