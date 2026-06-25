@@ -296,6 +296,10 @@ func _on_dig_input() -> void:
 	var target_grid_pos: Vector2i = _get_dig_target_grid_pos()
 	var result: Dictionary = world.try_dig_tile(target_grid_pos)
 	last_action = result["message"]
+
+	# Trigger dig animation even if digging fails — the worm still tries
+	if worm_animation:
+		worm_animation.play_dig(facing_direction)
 	
 	if result["success"] and result["cleared"]:
 		if result["resource_id"] == "dirt_pile":
