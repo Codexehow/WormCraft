@@ -1,18 +1,20 @@
-[gd_scene load_steps=3 format=3 uid="uid://cwmgvlvvvvqsn"]
+[gd_scene format=3 uid="uid://cwmgvlvvvvqsn"]
 
-[ext_resource type="Script" path="res://scripts/player/worm_player.gd" id="1_2j3h5"]
-[ext_resource type="Texture2D" path="res://assets/generated/worm_simple_frame_0.png" id="1_p3k9m"]
+[ext_resource type="Script" uid="uid://bqsfagej5exyv" path="res://scripts/player/worm_player.gd" id="1_2j3h5"]
+[ext_resource type="Texture2D" uid="uid://d3p8j01k5w2yq" path="res://assets/sprites/worm_crawl_right_scaled.png" id="1_crawl_right"]
 
 [sub_resource type="CapsuleShape2D" id="1_kmk3g"]
 radius = 8.0
 height = 16.0
 
-[node name="WormPlayer" type="CharacterBody2D"]
+[node name="WormPlayer" type="CharacterBody2D" unique_id=1640178826]
 script = ExtResource("1_2j3h5")
 
-[node name="Sprite2D" type="Sprite2D" parent="."]
-texture = ExtResource("1_p3k9m")
-scale = Vector2(1.5, 1.5)
+[node name="Sprite2D" type="Sprite2D" parent="." unique_id=565342849]
+texture = ExtResource("1_crawl_right")
+centered = false
+offset = Vector2(-40, -2.5)
+hframes = 4
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=1408605763]
 shape = SubResource("1_kmk3g")

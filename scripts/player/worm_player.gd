@@ -33,6 +33,10 @@ var last_action: String = ""
 var step_cooldown: float = 0.0
 var _raw_place_key_was_down: bool = false
 
+# Animation state
+var worm_animation: WormAnimation = null
+var _horizontal_facing: Vector2 = Vector2.RIGHT
+
 const DIG_REACH_TILES: int = 2
 
 # Reference to the world
@@ -47,12 +51,18 @@ signal tile_changed(tile_type: int)
 func _ready() -> void:
 	# Find the world
 	world = get_tree().root.find_child("LayeredTestWorld", true, false)
+	
 	if not world:
 		# Fallback for old name
 		world = get_tree().root.find_child("TestDirtWorld", true, false)
 	
 	if not InputMap.has_action("place_dirt"):
 		push_warning("InputMap action 'place_dirt' is missing. Add it in Project Settings > Input Map and bind it to F.")
+
+	# Initialize animation helper
+	worm_animation = WormAnimation.new()
+	add_child(worm_animation)
+	worm_animation._ready()
 
 	# Initialize hunger
 	hunger = STARTING_HUNGER
@@ -119,6 +129,20 @@ func _physics_process(delta: float) -> void:
 		facing_direction = Vector2.UP
 	if Input.is_action_pressed("move_down"):
 		facing_direction = Vector2.DOWN
+	
+	# Update animation: determine facing for horizontal movement
+	var moving_horizontally: bool = Input.is_action_pressed("move_left") or Input.is_action_pressed("move_right")
+	if moving_horizontally:
+		if Input.is_action_pressed("move_left"):
+			_horizontal_facing = Vector2.LEFT
+		elif Input.is_action_pressed("move_right"):
+			_horizontal_facing = Vector2.RIGHT
+	
+	# Update animation sprite facing (use horizontal facing for left/right, or preserve for up/down)
+	var animation_facing = facing_direction if facing_direction != Vector2.UP and facing_direction != Vector2.DOWN else _horizontal_facing
+	if worm_animation:
+		worm_animation.update_sprite(animation_facing, moving_horizontally)
+		worm_animation.update_animation(delta)
 	
 	if world:
 		var current_grid_pos: Vector2i = world.world_to_grid(global_position)
@@ -204,6 +228,8 @@ func _get_facing_offset() -> Vector2i:
 	elif facing_direction == Vector2.DOWN:
 		return Vector2i(0, 1)
 	return Vector2i(1, 0)
+
+
 
 func _get_target_grid_pos() -> Vector2i:
 	# Backward-compatible adjacent target. Placement uses this.

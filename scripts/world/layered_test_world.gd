@@ -11,16 +11,22 @@ enum TileType {
 	PLACED_DIRT
 }
 
-const TILE_SIZE: int = 16
+const TILE_SIZE: int = 32
+
 const WORLD_WIDTH: int = 96
 const WORLD_HEIGHT: int = 54
 
 # Grid of tile types
 var tile_grid: Array = []
 
+# Cached dirt texture for _draw() rendering
+var _dirt_texture: Texture2D = null
+
 # Tile durability tracking for partially dug tiles
 # tile_durability[Vector2i] = remaining durability
 var tile_durability: Dictionary = {}
+
+# (removed: dirt uses a single atlas tile now)
 
 # Durability values for diggable tiles
 const DIRT_MAX_DURABILITY: int = 8
@@ -49,9 +55,12 @@ var border_color: Color = Color.html("#6B4910")
 
 func _ready() -> void:
 	_initialize_layered_world()
+	# Load dirt texture for _draw() rendering (null if missing — safe fallback)
+	_dirt_texture = load("res://assets/tiles/dirt.png")
+	queue_redraw()
 
 func _process(_delta: float) -> void:
-	queue_redraw()
+	pass
 
 func _initialize_layered_world() -> void:
 	# Create empty 2D grid
@@ -94,14 +103,21 @@ func _initialize_layered_world() -> void:
 				tile_grid[y][x] = TileType.EMPTY
 
 func _draw() -> void:
-	# Draw all tiles
+	"""Render all tiles directly from tile_grid — single source of truth."""
 	for y in range(WORLD_HEIGHT):
 		for x in range(WORLD_WIDTH):
 			var tile_type: int = tile_grid[y][x]
-			var tile_color: Color = tile_colors.get(tile_type, Color.WHITE)
 			var rect_pos: Vector2 = Vector2(x * TILE_SIZE, y * TILE_SIZE)
-			draw_rect(Rect2(rect_pos, Vector2(TILE_SIZE, TILE_SIZE)), tile_color)
-			draw_rect(Rect2(rect_pos, Vector2(TILE_SIZE, TILE_SIZE)), border_color, false, 1.0)
+			var rect: Rect2 = Rect2(rect_pos, Vector2(TILE_SIZE, TILE_SIZE))
+			
+			if tile_type == TileType.DIRT and _dirt_texture:
+				draw_texture_rect(_dirt_texture, rect, false)
+			else:
+				var tile_color: Color = tile_colors.get(tile_type, Color.WHITE)
+				draw_rect(rect, tile_color)
+			
+			# Subtle border for visual clarity
+			draw_rect(rect, border_color, false, 1.0)
 
 # World query API
 func world_to_grid(world_position: Vector2) -> Vector2i:
@@ -112,6 +128,14 @@ func grid_to_world(grid_position: Vector2i) -> Vector2:
 
 func grid_to_world_center(grid_position: Vector2i) -> Vector2:
 	return grid_to_world(grid_position) + Vector2(TILE_SIZE / 2.0, TILE_SIZE / 2.0)
+
+func get_start_grid_position() -> Vector2i:
+	"""Return the grid position where the worm should spawn."""
+	return Vector2i(48, 20)
+
+func get_start_world_position() -> Vector2:
+	"""Return the world pixel position (tile center) where the worm should spawn."""
+	return grid_to_world_center(get_start_grid_position())
 
 func is_in_bounds(grid_position: Vector2i) -> bool:
 	return grid_position.x >= 0 and grid_position.x < WORLD_WIDTH and grid_position.y >= 0 and grid_position.y < WORLD_HEIGHT
@@ -182,6 +206,7 @@ func try_place_dirt_tile(grid_position: Vector2i, actor_grid_position: Vector2i)
 	
 	tile_grid[grid_position.y][grid_position.x] = TileType.PLACED_DIRT
 	tile_durability.erase(grid_position)
+	queue_redraw()
 	return {
 		"success": true,
 		"message": "Placed dirt.",
@@ -229,6 +254,7 @@ func _dig_solid_tile(
 	if current_durability <= 0:
 		tile_grid[grid_position.y][grid_position.x] = TileType.EMPTY
 		tile_durability.erase(grid_position)
+		queue_redraw()
 		return _dig_result(true, true, "Cleared %s tile!" % tile_label, tile_type, "dirt_pile", resource_amount, max_durability, max_durability)
 	
 	return _dig_result(

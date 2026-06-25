@@ -1,0 +1,42 @@
+[gd_resource type="TileSet" format=3 uid="uid://dninbjps4nffi"]
+
+[ext_resource type="Texture2D" uid="uid://crlich1iv1gxx" path="res://assets/tiles/air.png" id="1_air"]
+[ext_resource type="Texture2D" uid="uid://dy22blwlm6vrx" path="res://assets/tiles/empty_tunnel.png" id="2_empty"]
+[ext_resource type="Texture2D" uid="uid://dft8mdwklnqm8" path="res://assets/tiles/dirt.png" id="3_dirt"]
+[ext_resource type="Texture2D" uid="uid://oui2eaibfa03" path="res://assets/tiles/surface.png" id="4_surface"]
+[ext_resource type="Texture2D" uid="uid://injmg1x7ue15" path="res://assets/tiles/rock.png" id="5_rock"]
+[ext_resource type="Texture2D" uid="uid://djta11e665xvc" path="res://assets/tiles/placed_dirt.png" id="6_placed"]
+
+[sub_resource type="TileSetAtlasSource" id="AtlasSource_0"]
+texture = ExtResource("1_air")
+0:0/0 = 0
+
+[sub_resource type="TileSetAtlasSource" id="AtlasSource_1"]
+texture = ExtResource("2_empty")
+0:0/0 = 0
+
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_nvhks"]
+texture = ExtResource("3_dirt")
+texture_region_size = Vector2i(32, 32)
+0:0/0 = 0
+
+[sub_resource type="TileSetAtlasSource" id="AtlasSource_3"]
+texture = ExtResource("4_surface")
+0:0/0 = 0
+
+[sub_resource type="TileSetAtlasSource" id="AtlasSource_4"]
+texture = ExtResource("5_rock")
+0:0/0 = 0
+
+[sub_resource type="TileSetAtlasSource" id="AtlasSource_5"]
+texture = ExtResource("6_placed")
+0:0/0 = 0
+
+[resource]
+physics_layer_0/collision_layer = 1
+sources/0 = SubResource("AtlasSource_0")
+sources/1 = SubResource("AtlasSource_1")
+sources/3 = SubResource("AtlasSource_3")
+sources/4 = SubResource("AtlasSource_4")
+sources/5 = SubResource("AtlasSource_5")
+sources/2 = SubResource("TileSetAtlasSource_nvhks")

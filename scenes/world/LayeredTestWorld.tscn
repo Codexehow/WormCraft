@@ -1,6 +1,6 @@
-[gd_scene load_steps=2 format=3 uid="uid://cqn3xgkbqsvsl"]
+[gd_scene format=3 uid="uid://cqn3xgkbqsvsl"]
 
-[ext_resource type="Script" path="res://scripts/world/layered_test_world.gd" id="1_a5mlb"]
+[ext_resource type="Script" uid="uid://rdo8wrn7aupv" path="res://scripts/world/layered_test_world.gd" id="1_a5mlb"]
 
-[node name="LayeredTestWorld" type="Node2D"]
+[node name="LayeredTestWorld" type="Node2D" unique_id=191822503]
 script = ExtResource("1_a5mlb")
