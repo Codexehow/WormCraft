@@ -26,11 +26,20 @@ var base_offset_initialized: bool = false
 # Surface orientation state — set by worm_player via set_surface_orientation()
 var surface_orientation: String = "none"
 
+# -- VS009A Part 3B-D Diagnostic --
+var orientation_debug_logging: bool = false
+var _last_reported_surface_orientation: String = ""
+
 # Offset presets per surface orientation
 var default_sprite_offset: Vector2 = Vector2.ZERO
 var floor_sprite_offset: Vector2 = Vector2.ZERO
 var left_wall_sprite_offset: Vector2 = Vector2.ZERO
 var right_wall_sprite_offset: Vector2 = Vector2.ZERO
+
+# Rotation constants per surface orientation — applied in _apply_surface_visuals()
+const FLOOR_ROTATION: float = 0.0
+const LEFT_WALL_ROTATION: float = -PI / 2.0
+const RIGHT_WALL_ROTATION: float = PI / 2.0
 
 func _ready() -> void:
 	sprite = get_parent().get_node_or_null("Sprite2D")
@@ -140,27 +149,50 @@ func set_surface_orientation(new_orientation: String) -> void:
 	"""Public API: set the current surface orientation and apply matching offset preset.
 	Accepts 'none', 'floor', 'left_wall', 'right_wall'.
 	Unknown orientations fall back to 'none'."""
+	var resolved_orientation: String = new_orientation
 	match new_orientation:
 		"floor", "left_wall", "right_wall", "none":
-			surface_orientation = new_orientation
+			resolved_orientation = new_orientation
 		_:
-			surface_orientation = "none"
+			resolved_orientation = "none"
 
+	if orientation_debug_logging and resolved_orientation != surface_orientation:
+		print("ANIMATION received orientation: ", surface_orientation, " -> ", resolved_orientation)
+
+	surface_orientation = resolved_orientation
 	_apply_surface_visuals()
 
 
 func _apply_surface_visuals() -> void:
-	"""Apply the sprite offset preset for the current surface_orientation.
-	Does NOT set rotation — rotation will be added in a future pass."""
+	"""Apply the sprite offset and rotation preset for the current surface_orientation.
+	Only the Sprite2D visually rotates — player node, collision, and grid anchor remain unchanged."""
 	if not sprite:
 		return
 
 	match surface_orientation:
 		"floor":
 			sprite.offset = floor_sprite_offset
+			sprite.rotation = FLOOR_ROTATION
+			sprite.modulate = Color.WHITE
 		"left_wall":
 			sprite.offset = left_wall_sprite_offset
+			sprite.rotation = LEFT_WALL_ROTATION
+			sprite.modulate = Color.WHITE
 		"right_wall":
 			sprite.offset = right_wall_sprite_offset
+			sprite.rotation = RIGHT_WALL_ROTATION
+			sprite.modulate = Color.WHITE
 		_:
 			sprite.offset = floor_sprite_offset
+			sprite.rotation = FLOOR_ROTATION
+			sprite.modulate = Color.WHITE
+
+	if orientation_debug_logging and surface_orientation != _last_reported_surface_orientation:
+		print("SPRITE visuals applied: orientation=", surface_orientation,
+			" rotation=", sprite.rotation,
+			" degrees=", sprite.rotation_degrees,
+			" offset=", sprite.offset,
+			" scale=", sprite.scale,
+			" sprite=", sprite.name,
+			" path=", sprite.get_path())
+		_last_reported_surface_orientation = surface_orientation

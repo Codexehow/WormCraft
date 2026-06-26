@@ -75,11 +75,22 @@ var grip_locked_until_landed: bool = false
 # Debug anchor visualization — VS009A Part 2J: visual-only debug overlay
 var show_anchor_debug: bool = false  # VS009A Part 2L: off by default; toggle for diagnostic overlay
 
+# -- VS009A Part 3B-D Diagnostic --
+var orientation_debug_logging: bool = false
+var _last_sent_animation_orientation: String = ""
+var _last_reported_grip_orientation: String = ""
+
 # Grip step state — VS009A Part 2H: Grid-locked step movement
 var is_grip_stepping: bool = false
 var grip_step_target_grid: Vector2i = Vector2i.ZERO
 var grip_step_target_position: Vector2 = Vector2.ZERO
 var grip_step_input_dir: Vector2i = Vector2i.ZERO  # Direction used when step started — for directional contact validation on arrival
+
+# Normal tap-step movement — VS009A Part 3C
+var is_normal_stepping: bool = false
+var normal_step_target_grid: Vector2i = Vector2i.ZERO
+var normal_step_target_position: Vector2 = Vector2.ZERO
+var normal_step_input_dir: Vector2i = Vector2i.ZERO
 
 const DIG_REACH_TILES: int = 2
 
@@ -172,33 +183,60 @@ func _physics_process(delta: float) -> void:
 		return
 	
 	step_cooldown = max(step_cooldown - delta, 0.0)
-	var horizontal_direction: Vector2 = Vector2.ZERO
 	
-	# Handle horizontal movement input
-	if Input.is_action_pressed("move_left"):
-		horizontal_direction.x -= 1.0
-		facing_direction = Vector2.LEFT
-	if Input.is_action_pressed("move_right"):
-		horizontal_direction.x += 1.0
-		facing_direction = Vector2.RIGHT
+	# VS009A Part 3C-R1: Facing driven by active step direction, not held keys.
+	# Held keys still update facing for dig targeting, but do NOT override step direction.
+	# When no step is active and no key is held, preserve the last intentional facing.
 	
-	# Handle facing direction from vertical input, not free vertical movement.
-	# W/Up lets the player dig upward. It does not move the worm upward.
-	if Input.is_action_pressed("move_up"):
-		facing_direction = Vector2.UP
-	if Input.is_action_pressed("move_down"):
-		facing_direction = Vector2.DOWN
+	# Determine if any held key should update facing for targeting purposes.
+	var held_left: bool = Input.is_action_pressed("move_left")
+	var held_right: bool = Input.is_action_pressed("move_right")
+	var held_up: bool = Input.is_action_pressed("move_up")
+	var held_down: bool = Input.is_action_pressed("move_down")
 	
-	# Update animation: determine facing for horizontal movement
-	var moving_horizontally: bool = Input.is_action_pressed("move_left") or Input.is_action_pressed("move_right")
-	if moving_horizontally:
-		if Input.is_action_pressed("move_left"):
+	# Step-driven facing takes priority over held-key facing.
+	if is_normal_stepping:
+		# Normal step direction drives facing during the step.
+		if normal_step_input_dir.x < 0:
+			facing_direction = Vector2.LEFT
 			_horizontal_facing = Vector2.LEFT
-		elif Input.is_action_pressed("move_right"):
+		elif normal_step_input_dir.x > 0:
+			facing_direction = Vector2.RIGHT
 			_horizontal_facing = Vector2.RIGHT
+		elif normal_step_input_dir.y > 0:
+			facing_direction = Vector2.DOWN
+		# Note: normal step never goes up.
+	elif is_grip_stepping:
+		# Grip step direction drives facing during the step.
+		if grip_step_input_dir.x < 0:
+			facing_direction = Vector2.LEFT
+			_horizontal_facing = Vector2.LEFT
+		elif grip_step_input_dir.x > 0:
+			facing_direction = Vector2.RIGHT
+			_horizontal_facing = Vector2.RIGHT
+		elif grip_step_input_dir.y < 0:
+			facing_direction = Vector2.UP
+		elif grip_step_input_dir.y > 0:
+			facing_direction = Vector2.DOWN
+	else:
+		# No active step — held keys update facing for dig/action targeting.
+		# No held key = preserve last intentional facing (no default to RIGHT).
+		if held_left:
+			facing_direction = Vector2.LEFT
+			_horizontal_facing = Vector2.LEFT
+		elif held_right:
+			facing_direction = Vector2.RIGHT
+			_horizontal_facing = Vector2.RIGHT
+		elif held_up:
+			facing_direction = Vector2.UP
+		elif held_down:
+			facing_direction = Vector2.DOWN
+		# else: preserve current facing_direction and _horizontal_facing — no reset to RIGHT.
 	
+	# Animation movement flag uses step state rather than held-key state.
+	var moving_horizontally: bool = is_normal_stepping or is_grip_stepping
 	# Update animation sprite facing (use horizontal facing for left/right, or preserve for up/down)
-	var animation_facing = facing_direction if facing_direction != Vector2.UP and facing_direction != Vector2.DOWN else _horizontal_facing
+	var animation_facing: Vector2 = facing_direction if facing_direction != Vector2.UP and facing_direction != Vector2.DOWN else _horizontal_facing
 	if worm_animation:
 		worm_animation.update_sprite(animation_facing, moving_horizontally)
 		worm_animation.update_animation(delta)
@@ -215,6 +253,8 @@ func _physics_process(delta: float) -> void:
 		# Right-mouse press/release edge detection diagnostics
 		if right_mouse_held and not _was_grip_input_down:
 			last_action = "Grip engaged."
+			# Cancel any pending normal step — grip takes priority
+			is_normal_stepping = false
 			_grip_debug_printed = false  # Reset for next press diagnostics
 			_ceiling_grip_rejection_printed = false  # Reset ceiling message for new grip attempt
 		if not right_mouse_held and _was_grip_input_down:
@@ -234,41 +274,24 @@ func _physics_process(delta: float) -> void:
 			grip_active = false
 			last_action = "Cannot grip while falling."
 		elif right_mouse_held:
-			grip_active = _handle_grip_movement(current_grid_pos, horizontal_direction, delta)
+			# _horizontal_direction is unused in _handle_grip_movement — pass zero
+			grip_active = _handle_grip_movement(current_grid_pos, Vector2.ZERO, delta)
 		
 		if not grip_active:
 			# Release grip state if we were gripping but no longer active
 			if is_gripping:
 				_release_grip()
 			
-			# Normal movement (Part 1 behavior — slow crawl, no auto step-up)
-			if horizontal_direction.length() > 0.0:
-				var target_x: int = current_grid_pos.x
-				if horizontal_direction.x < 0:
-					target_x -= 1
-				else:
-					target_x += 1
-				
-				var target_pos: Vector2i = Vector2i(target_x, current_grid_pos.y)
-				
-				if world.is_passable(target_pos):
-					velocity.x = horizontal_direction.x * MOVE_SPEED
-				else:
-					velocity.x = 0.0
-					# VS009A Part 1: Automatic step-up disabled in normal movement.
-					# Future right-mouse grip will own deliberate climbing.
-					#_try_step_up(current_grid_pos, target_x)
-			else:
+			# VS009A Part 3C: Tap-step normal movement (replace continuous sliding)
+			var step_active: bool = _continue_normal_step()
+			if not step_active:
+				_try_start_normal_step(current_grid_pos)
+			
+			# No held-key continuous velocity — only move during active steps.
+			if not is_normal_stepping:
 				velocity.x = 0.0
 			
-			# Down input is allowed to encourage falling/crawling downward if there is already space below.
-			# It cannot dig or phase through solid tiles by itself.
-			if Input.is_action_pressed("move_down"):
-				var below_for_drop: Vector2i = Vector2i(current_grid_pos.x, current_grid_pos.y + 1)
-				if world.is_passable(below_for_drop):
-					velocity.y = max(velocity.y, MOVE_SPEED)
-			
-			# Gravity-driven vertical movement.
+			# Gravity-driven vertical movement (unchanged).
 			# W/Up must never create negative/upward velocity here.
 			var below_pos: Vector2i = Vector2i(current_grid_pos.x, current_grid_pos.y + 1)
 			if world.is_passable(below_pos):
@@ -304,13 +327,15 @@ func _physics_process(delta: float) -> void:
 		if _post_move_grid != _prev_safe_grid and not world.is_passable(_post_move_grid) and world.is_passable(_prev_safe_grid):
 			global_position = _prev_safe_position
 			velocity = Vector2.ZERO
+			is_normal_stepping = false
 			_release_grip()
 			last_action = "Blocked by solid terrain."
 			print("Blocked: restored from solid tile ", _post_move_grid, " to ", _prev_safe_grid)
 			_update_current_tile()
 
-		# Debug anchor redraw — VS009A Part 2J
-		queue_redraw()
+		# Debug anchor redraw — VS009A Part 2J — only redraw when debug overlay is enabled
+		if show_anchor_debug:
+			queue_redraw()
 
 
 func _draw() -> void:
@@ -577,7 +602,7 @@ func _find_best_grip_surface() -> Dictionary:
 	var current_grid: Vector2i = _get_current_grid_pos()
 	
 	# Diagnostic: report tile state — only once per press to avoid spam
-	if not _grip_debug_printed:
+	if orientation_debug_logging and not _grip_debug_printed:
 		var below_grid: Vector2i = current_grid + Vector2i(0, 1)
 		var left_grid: Vector2i = current_grid + Vector2i(-1, 0)
 		var right_grid: Vector2i = current_grid + Vector2i(1, 0)
@@ -702,24 +727,18 @@ func _handle_grip_movement(_current_grid_pos: Vector2i, _horizontal_direction: V
 			grip_orientation = arrival_surface.get("orientation", grip_orientation)
 			grip_normal = arrival_surface.get("normal", grip_normal)
 			grip_target_grid = arrival_surface.get("grid", grip_target_grid)
+			_debug_report_grip_orientation("step_complete")
 			last_action = "Grip step complete: grid=(%d,%d), surface=%s" % [grip_step_target_grid.x, grip_step_target_grid.y, grip_orientation]
 			return true
 		else:
 			velocity = to_target.normalized() * GRIP_MOVE_SPEED
 			return true
 
-	# Step 3 — Start New Grip Step From Input
-	# Priority: W/S first, then A/D (same priority as existing grip movement)
-	var input_dir := Vector2i.ZERO
-
-	if Input.is_action_pressed("move_up"):
-		input_dir = Vector2i(0, -1)
-	elif Input.is_action_pressed("move_down"):
-		input_dir = Vector2i(0, 1)
-	elif Input.is_action_pressed("move_left"):
-		input_dir = Vector2i(-1, 0)
-	elif Input.is_action_pressed("move_right"):
-		input_dir = Vector2i(1, 0)
+	# Step 3 — Start New Grip Step From Tap Input
+	# VS009A Part 3C: Changed from is_action_pressed to is_action_just_pressed (tap-to-step).
+	# Holding a key no longer chains steps — each step requires a fresh tap.
+	# Priority: W/S first, then A/D.
+	var input_dir := _get_grip_tap_input_dir()
 
 	if input_dir == Vector2i.ZERO:
 		velocity = Vector2.ZERO
@@ -743,14 +762,17 @@ func _handle_grip_movement(_current_grid_pos: Vector2i, _horizontal_direction: V
 			grip_orientation = corner_surface.get("orientation", grip_orientation)
 			grip_normal = corner_surface.get("normal", grip_normal)
 			grip_target_grid = corner_surface.get("grid", grip_target_grid)
+			_debug_report_grip_orientation("corner_step_start")
 
 			last_action = "Grip step (corner): %s" % grip_orientation
-			print("Grip step started: current=(%d,%d), target=(%d,%d), surface=%s, input=(%d,%d)" % [current_check.x, current_check.y, candidate.x, candidate.y, grip_orientation, input_dir.x, input_dir.y])
+			if orientation_debug_logging:
+				print("Grip step started: current=(%d,%d), target=(%d,%d), surface=%s, input=(%d,%d)" % [current_check.x, current_check.y, candidate.x, candidate.y, grip_orientation, input_dir.x, input_dir.y])
 			return true
 		else:
 			velocity = Vector2.ZERO
 			last_action = "Grip blocked: no safe step."
-			print("Grip blocked: no safe step from (%d,%d) input=(%d,%d)" % [current_check.x, current_check.y, input_dir.x, input_dir.y])
+			if orientation_debug_logging:
+				print("Grip blocked: no safe step from (%d,%d) input=(%d,%d)" % [current_check.x, current_check.y, input_dir.x, input_dir.y])
 			return true
 
 	# Target is passable — check for direction-compatible adjacent grip surface
@@ -758,7 +780,8 @@ func _handle_grip_movement(_current_grid_pos: Vector2i, _horizontal_direction: V
 	if not target_surface.get("found", false):
 		velocity = Vector2.ZERO
 		last_action = "Grip blocked: no directional contact for input=(%d,%d) at target=(%d,%d)" % [input_dir.x, input_dir.y, target_grid.x, target_grid.y]
-		print("Grip blocked: no directional contact for input=(%d,%d) at target=(%d,%d)" % [input_dir.x, input_dir.y, target_grid.x, target_grid.y])
+		if orientation_debug_logging:
+			print("Grip blocked: no directional contact for input=(%d,%d) at target=(%d,%d)" % [input_dir.x, input_dir.y, target_grid.x, target_grid.y])
 		return true
 
 	# Start validated grip step toward target
@@ -770,9 +793,11 @@ func _handle_grip_movement(_current_grid_pos: Vector2i, _horizontal_direction: V
 	grip_orientation = target_surface.get("orientation", grip_orientation)
 	grip_normal = target_surface.get("normal", grip_normal)
 	grip_target_grid = target_surface.get("grid", grip_target_grid)
+	_debug_report_grip_orientation("step_start")
 
 	last_action = "Grip step: %s" % grip_orientation
-	print("Grip step started: current=(%d,%d), target=(%d,%d), surface=%s, input=(%d,%d)" % [current_check.x, current_check.y, target_grid.x, target_grid.y, grip_orientation, input_dir.x, input_dir.y])
+	if orientation_debug_logging:
+		print("Grip step started: current=(%d,%d), target=(%d,%d), surface=%s, input=(%d,%d)" % [current_check.x, current_check.y, target_grid.x, target_grid.y, grip_orientation, input_dir.x, input_dir.y])
 	return true
 
 
@@ -786,20 +811,157 @@ func _release_grip() -> void:
 	grip_step_input_dir = Vector2i.ZERO
 
 
+# -------- VS009A Part 3C: Tap-step input helpers --------
+
+func _get_normal_tap_input_dir() -> Vector2i:
+	"""Read a single tap of A/D/S for normal movement. Returns Vector2i.ZERO if no tap.
+	A/D start horizontal steps. S may start a downward step into passable space.
+	W must NOT start upward movement in normal mode."""
+	if Input.is_action_just_pressed("move_left"):
+		return Vector2i(-1, 0)
+	if Input.is_action_just_pressed("move_right"):
+		return Vector2i(1, 0)
+	if Input.is_action_just_pressed("move_down"):
+		return Vector2i(0, 1)
+	return Vector2i.ZERO
+
+
+func _get_grip_tap_input_dir() -> Vector2i:
+	"""Read a single tap of W/A/S/D for grip movement. Priority: W/S first, then A/D.
+	Each tap starts exactly one grip step."""
+	if Input.is_action_just_pressed("move_up"):
+		return Vector2i(0, -1)
+	if Input.is_action_just_pressed("move_down"):
+		return Vector2i(0, 1)
+	if Input.is_action_just_pressed("move_left"):
+		return Vector2i(-1, 0)
+	if Input.is_action_just_pressed("move_right"):
+		return Vector2i(1, 0)
+	return Vector2i.ZERO
+
+
+func _try_start_normal_step(current_grid: Vector2i) -> bool:
+	"""Check for a normal-mode tap input and start a step toward the target tile center.
+	Returns true if a step was started or is already in progress."""
+	if is_normal_stepping:
+		return true
+
+	var input_dir := _get_normal_tap_input_dir()
+	if input_dir == Vector2i.ZERO:
+		return false
+
+	# Never allow normal upward movement.
+	if input_dir.y < 0:
+		return false
+
+	# Do not allow tap-stepping while falling.
+	if is_falling or grip_locked_until_landed:
+		return false
+
+	var target_grid := current_grid + input_dir
+	if not world or not world.is_passable(target_grid):
+		velocity.x = 0.0
+		last_action = "Blocked."
+		return false
+
+	normal_step_target_grid = target_grid
+	normal_step_target_position = world.grid_to_world_center(target_grid)
+	normal_step_input_dir = input_dir
+	is_normal_stepping = true
+	last_action = "Crawling."
+	return true
+
+
+func _continue_normal_step() -> bool:
+	"""Continue an active normal tap-step. Moves toward the target tile center.
+	For horizontal steps, only the X coordinate is snapped to avoid gravity interference.
+	Returns true while a step is active."""
+	if not is_normal_stepping:
+		return false
+
+	# Cancel step if the worm is falling — no steering mid-air.
+	if is_falling:
+		is_normal_stepping = false
+		normal_step_input_dir = Vector2i.ZERO
+		return false
+
+	if not world:
+		is_normal_stepping = false
+		return false
+
+	# If the target became solid, cancel the step.
+	if not world.is_passable(normal_step_target_grid):
+		is_normal_stepping = false
+		velocity = Vector2.ZERO
+		last_action = "Blocked."
+		return false
+
+	var to_target: Vector2 = normal_step_target_position - global_position
+
+	# For horizontal steps, check X distance only (gravity handles Y).
+	if normal_step_input_dir.x != 0:
+		if abs(to_target.x) <= 1.0:
+			global_position.x = normal_step_target_position.x
+			is_normal_stepping = false
+			normal_step_input_dir = Vector2i.ZERO
+			velocity.x = 0.0
+			return false
+		velocity.x = sign(to_target.x) * MOVE_SPEED
+		return true
+
+	# For downward steps, check Y distance.
+	if normal_step_input_dir.y > 0:
+		if abs(to_target.y) <= 1.0:
+			global_position.y = normal_step_target_position.y
+			is_normal_stepping = false
+			normal_step_input_dir = Vector2i.ZERO
+			velocity.y = 0.0
+			return false
+		velocity.y = sign(to_target.y) * MOVE_SPEED
+		return true
+
+	# Fallback — if step direction is unhandled, clear it.
+	is_normal_stepping = false
+	normal_step_input_dir = Vector2i.ZERO
+	return false
+
+
+func _debug_report_grip_orientation(context: String) -> void:
+	"""VS009A Part 3B-D: report grip_orientation changes only."""
+	if not orientation_debug_logging:
+		return
+	if grip_orientation == _last_reported_grip_orientation:
+		return
+	print("GRIP orientation changed [", context, "]: ", _last_reported_grip_orientation, " -> ", grip_orientation,
+		" target_grid=", grip_target_grid,
+		" normal=", grip_normal)
+	_last_reported_grip_orientation = grip_orientation
+
+
 func _update_animation_surface_orientation() -> void:
 	"""Tell worm_animation the current surface orientation based on grip state.
 	Called once per physics frame after grip state is fully processed."""
 	if not worm_animation:
 		return
 
+	var orientation_to_send: String = "floor"
+
 	if is_gripping:
 		match grip_orientation:
 			"floor", "left_wall", "right_wall":
-				worm_animation.set_surface_orientation(grip_orientation)
+				orientation_to_send = grip_orientation
 			_:
-				worm_animation.set_surface_orientation("floor")
+				orientation_to_send = "floor"
 	else:
-		worm_animation.set_surface_orientation("floor")
+		orientation_to_send = "floor"
+
+	if orientation_debug_logging and orientation_to_send != _last_sent_animation_orientation:
+		print("PLAYER -> ANIMATION orientation: gripping=", is_gripping,
+			" grip_orientation=", grip_orientation,
+			" sending=", orientation_to_send)
+		_last_sent_animation_orientation = orientation_to_send
+
+	worm_animation.set_surface_orientation(orientation_to_send)
 
 
 # -------- End VS009A Part 2 --------
