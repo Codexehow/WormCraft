@@ -23,6 +23,15 @@ var base_offset: Vector2 = Vector2.ZERO
 var base_scale: Vector2 = Vector2.ONE
 var base_offset_initialized: bool = false
 
+# Surface orientation state — set by worm_player via set_surface_orientation()
+var surface_orientation: String = "none"
+
+# Offset presets per surface orientation
+var default_sprite_offset: Vector2 = Vector2.ZERO
+var floor_sprite_offset: Vector2 = Vector2.ZERO
+var left_wall_sprite_offset: Vector2 = Vector2.ZERO
+var right_wall_sprite_offset: Vector2 = Vector2.ZERO
+
 func _ready() -> void:
 	sprite = get_parent().get_node_or_null("Sprite2D")
 	if sprite:
@@ -31,6 +40,10 @@ func _ready() -> void:
 		base_offset = sprite.offset
 		base_scale = sprite.scale
 		base_offset_initialized = true
+		default_sprite_offset = sprite.offset
+		floor_sprite_offset = default_sprite_offset
+		left_wall_sprite_offset = default_sprite_offset
+		right_wall_sprite_offset = default_sprite_offset
 		update_texture()
 
 func update_sprite(facing: Vector2, moving: bool) -> void:
@@ -62,7 +75,7 @@ func update_animation(delta: float) -> void:
 			sprite.frame = 0
 		animation_time = 0.0
 		animation_frame = 0
-		sprite.offset = base_offset
+		_apply_surface_visuals()
 		sprite.scale = base_scale
 		return
 
@@ -119,5 +132,35 @@ func _update_dig_animation(delta: float) -> void:
 	if dig_time >= dig_duration:
 		is_digging = false
 		dig_time = 0.0
-		sprite.offset = base_offset
+		_apply_surface_visuals()
 		sprite.scale = base_scale
+
+
+func set_surface_orientation(new_orientation: String) -> void:
+	"""Public API: set the current surface orientation and apply matching offset preset.
+	Accepts 'none', 'floor', 'left_wall', 'right_wall'.
+	Unknown orientations fall back to 'none'."""
+	match new_orientation:
+		"floor", "left_wall", "right_wall", "none":
+			surface_orientation = new_orientation
+		_:
+			surface_orientation = "none"
+
+	_apply_surface_visuals()
+
+
+func _apply_surface_visuals() -> void:
+	"""Apply the sprite offset preset for the current surface_orientation.
+	Does NOT set rotation — rotation will be added in a future pass."""
+	if not sprite:
+		return
+
+	match surface_orientation:
+		"floor":
+			sprite.offset = floor_sprite_offset
+		"left_wall":
+			sprite.offset = left_wall_sprite_offset
+		"right_wall":
+			sprite.offset = right_wall_sprite_offset
+		_:
+			sprite.offset = floor_sprite_offset

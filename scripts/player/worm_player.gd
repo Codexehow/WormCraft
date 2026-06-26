@@ -293,6 +293,9 @@ func _physics_process(delta: float) -> void:
 				if velocity.y > 0.0:
 					velocity.y = 0.0
 		
+		# Update animation surface orientation based on current grip state
+		_update_animation_surface_orientation()
+
 		move_and_slide()
 		_update_current_tile()
 		
@@ -781,6 +784,22 @@ func _release_grip() -> void:
 	grip_target_grid = Vector2i.ZERO
 	is_grip_stepping = false
 	grip_step_input_dir = Vector2i.ZERO
+
+
+func _update_animation_surface_orientation() -> void:
+	"""Tell worm_animation the current surface orientation based on grip state.
+	Called once per physics frame after grip state is fully processed."""
+	if not worm_animation:
+		return
+
+	if is_gripping:
+		match grip_orientation:
+			"floor", "left_wall", "right_wall":
+				worm_animation.set_surface_orientation(grip_orientation)
+			_:
+				worm_animation.set_surface_orientation("floor")
+	else:
+		worm_animation.set_surface_orientation("floor")
 
 
 # -------- End VS009A Part 2 --------
