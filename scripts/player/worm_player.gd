@@ -92,6 +92,10 @@ var normal_step_target_grid: Vector2i = Vector2i.ZERO
 var normal_step_target_position: Vector2 = Vector2.ZERO
 var normal_step_input_dir: Vector2i = Vector2i.ZERO
 
+# VS009A Part 3C-R2: Turn-then-step — prevents step movement on the frame where the player
+# tapped the opposite horizontal direction (which should only turn, not move).
+var _normal_turn_only_this_frame: bool = false
+
 const DIG_REACH_TILES: int = 2
 
 # Reference to the world
@@ -219,6 +223,27 @@ func _physics_process(delta: float) -> void:
 		elif grip_step_input_dir.y > 0:
 			facing_direction = Vector2.DOWN
 	else:
+		# VS009A Part 3C-R2: Turn-then-step — horizontal tap opposite facing turns without moving.
+		# This runs before the held-key facing so turn-only inputs are detected before held-key
+		# logic overwrites _horizontal_facing. Set in `_try_start_normal_step()` for initial facing
+		# alignment; set here for immediate turn-only taps.
+		_normal_turn_only_this_frame = false
+		if not is_normal_stepping:
+			var just_left: bool = Input.is_action_just_pressed("move_left")
+			var just_right: bool = Input.is_action_just_pressed("move_right")
+			if just_left and _horizontal_facing != Vector2.LEFT:
+				facing_direction = Vector2.LEFT
+				_horizontal_facing = Vector2.LEFT
+				velocity.x = 0.0
+				last_action = "Turned left."
+				_normal_turn_only_this_frame = true
+			elif just_right and _horizontal_facing != Vector2.RIGHT:
+				facing_direction = Vector2.RIGHT
+				_horizontal_facing = Vector2.RIGHT
+				velocity.x = 0.0
+				last_action = "Turned right."
+				_normal_turn_only_this_frame = true
+		
 		# No active step — held keys update facing for dig/action targeting.
 		# No held key = preserve last intentional facing (no default to RIGHT).
 		if held_left:
@@ -318,6 +343,14 @@ func _physics_process(delta: float) -> void:
 		
 		# Update animation surface orientation based on current grip state
 		_update_animation_surface_orientation()
+
+		# VS009A Part 3E: Wall head direction — pass grip movement direction to animation
+		if worm_animation and is_gripping:
+			if grip_step_input_dir.y < 0:
+				worm_animation.set_wall_head_direction(Vector2.UP)
+			elif grip_step_input_dir.y > 0:
+				worm_animation.set_wall_head_direction(Vector2.DOWN)
+			# If not stepping (input_dir.y == 0), preserve last wall_head_direction — don't default to UP.
 
 		move_and_slide()
 		_update_current_tile()
@@ -856,6 +889,10 @@ func _try_start_normal_step(current_grid: Vector2i) -> bool:
 
 	# Do not allow tap-stepping while falling.
 	if is_falling or grip_locked_until_landed:
+		return false
+
+	# VS009A Part 3C-R2: If this frame was a turn-only horizontal tap, do not start a step.
+	if _normal_turn_only_this_frame and input_dir.x != 0:
 		return false
 
 	var target_grid := current_grid + input_dir
