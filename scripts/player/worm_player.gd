@@ -60,6 +60,21 @@ var grip_target_grid: Vector2i = Vector2i.ZERO
 var _was_grip_input_down: bool = false  # Diagnostic: track right-mouse press edge
 var _grip_debug_printed: bool = false  # Prevent console spam: only print diagnostics once per press
 
+# Grip capability flags — VS009A Part 2K
+# Future equipment/prototypes may enable ceiling grip.
+# Base worm cannot grip ceilings.
+var can_grip_ceiling: bool = false
+var _ceiling_grip_rejection_printed: bool = false  # One-time print per rejection event
+
+# Debug anchor visualization — VS009A Part 2J: visual-only debug overlay
+var show_anchor_debug: bool = true
+
+# Grip step state — VS009A Part 2H: Grid-locked step movement
+var is_grip_stepping: bool = false
+var grip_step_target_grid: Vector2i = Vector2i.ZERO
+var grip_step_target_position: Vector2 = Vector2.ZERO
+var grip_step_input_dir: Vector2i = Vector2i.ZERO  # Direction used when step started — for directional contact validation on arrival
+
 const DIG_REACH_TILES: int = 2
 
 # Reference to the world
@@ -196,9 +211,11 @@ func _physics_process(delta: float) -> void:
 			print("Right mouse grip input detected.")
 			last_action = "Right mouse grip input detected."
 			_grip_debug_printed = false  # Reset for next press diagnostics
+			_ceiling_grip_rejection_printed = false  # Reset ceiling message for new grip attempt
 		if not right_mouse_held and _was_grip_input_down:
 			print("Right mouse grip input released.")
 			last_action = "Right mouse grip input released."
+			is_grip_stepping = false
 		_was_grip_input_down = right_mouse_held
 		
 		var grip_active: bool = false
@@ -269,6 +286,36 @@ func _physics_process(delta: float) -> void:
 			print("Blocked: restored from solid tile ", _post_move_grid, " to ", _prev_safe_grid)
 			_update_current_tile()
 
+		# Debug anchor redraw — VS009A Part 2J
+		queue_redraw()
+
+
+func _draw() -> void:
+	"""VS009A Part 2J: Debug overlay showing logical anchor position vs visible sprite."""
+	if not show_anchor_debug:
+		return
+	if not world:
+		return
+
+	# 1. Logical origin — red circle at global_position (local origin)
+	draw_circle(Vector2.ZERO, 4.0, Color.RED)
+
+	# 2. Current grid cell outline — yellow
+	var current_grid: Vector2i = world.world_to_grid(global_position)
+	var grid_world_pos: Vector2 = world.grid_to_world(current_grid)
+	var grid_local_pos: Vector2 = to_local(grid_world_pos)
+	draw_rect(Rect2(grid_local_pos, Vector2(world.TILE_SIZE, world.TILE_SIZE)), Color.YELLOW, false, 2.0)
+
+	# 3. Current grid center — cyan dot
+	var grid_center: Vector2 = world.grid_to_world_center(current_grid)
+	draw_circle(to_local(grid_center), 3.0, Color.CYAN)
+
+	# 4. Grip step target if active — magenta dot + line
+	if is_grip_stepping:
+		draw_circle(to_local(grip_step_target_position), 5.0, Color.MAGENTA)
+		draw_line(Vector2.ZERO, to_local(grip_step_target_position), Color.MAGENTA, 2.0)
+
+
 func _try_step_up(current_grid_pos: Vector2i, target_x: int) -> void:
 	"""
 	Simple one-tile step-up movement.
@@ -322,6 +369,13 @@ func _is_solid_for_grip(grid_pos: Vector2i) -> bool:
 		or tile_type == world.TileType.PLACED_DIRT
 
 
+func _orientation_allowed_for_base_grip(orientation: String) -> bool:
+	"""Return false for ceiling grip unless the capability flag is set."""
+	if orientation == "ceiling" and not can_grip_ceiling:
+		return false
+	return true
+
+
 func _find_grip_surface_for_grid(grid_pos: Vector2i) -> Dictionary:
 	"""Check all four adjacent tiles of grid_pos for a valid grip surface.
 	A valid surface means a solid tile (DIRT, SURFACE, ROCK, or PLACED_DIRT)
@@ -354,11 +408,104 @@ func _find_grip_surface_for_grid(grid_pos: Vector2i) -> Dictionary:
 		}
 	]
 
+	var ceiling_only: bool = true
+	var has_any_solid: bool = false
 	for candidate in candidates:
 		if _is_solid_for_grip(candidate["grid"]):
-			return candidate
+			has_any_solid = true
+			var orientation: String = candidate.get("orientation", "none")
+			if _orientation_allowed_for_base_grip(orientation):
+				return candidate
+			# Falls through — candidate is solid but orientation not allowed (e.g. ceiling)
+		else:
+			ceiling_only = false
+
+	# If the only solid surface was above (ceiling) and base worm can't grip it, print once
+	if has_any_solid and ceiling_only and not can_grip_ceiling and not _ceiling_grip_rejection_printed:
+		_ceiling_grip_rejection_printed = true
+		print("Ceiling grip unavailable for base worm.")
+		last_action = "Ceiling grip unavailable for base worm."
 
 	return {"found": false, "grid": Vector2i.ZERO, "normal": Vector2.ZERO, "orientation": "none"}
+
+
+func _surface_is_valid_for_grip_direction(surface_orientation: String, input_dir: Vector2i) -> bool:
+	"""
+	Return true if the given surface orientation is a valid contact surface
+	for the given movement direction.
+	
+	Vertical movement (W/S up/down) requires left_wall or right_wall contact.
+	Horizontal movement (A/D left/right) allows floor or walls.
+	
+	Ceiling grip requires can_grip_ceiling capability flag — VS009A Part 2K.
+	"""
+	if surface_orientation == "ceiling" and not can_grip_ceiling:
+		return false
+
+	if input_dir.y != 0:
+		# Vertical grip movement requires side wall contact
+		return surface_orientation == "left_wall" or surface_orientation == "right_wall"
+
+	if input_dir.x != 0:
+		# Horizontal grip movement may use floor, walls, or ceiling (if allowed)
+		return surface_orientation == "floor" \
+			or surface_orientation == "left_wall" \
+			or surface_orientation == "right_wall" \
+			or (surface_orientation == "ceiling" and can_grip_ceiling)
+
+	return false
+
+
+func _find_grip_surface_for_grid_and_direction(grid_pos: Vector2i, input_dir: Vector2i) -> Dictionary:
+	"""
+	Check all four adjacent tiles of grid_pos for a valid grip surface
+	that is compatible with the movement direction.
+	
+	For vertical movement, only left_wall or right_wall surfaces count.
+	For horizontal movement, any solid surface counts.
+	
+	Returns { found: bool, grid: Vector2i, normal: Vector2, orientation: String }.
+	"""
+	var candidates := [
+		{
+			"found": true,
+			"grid": grid_pos + Vector2i(0, 1),
+			"normal": Vector2.UP,
+			"orientation": "floor"
+		},
+		{
+			"found": true,
+			"grid": grid_pos + Vector2i(-1, 0),
+			"normal": Vector2.RIGHT,
+			"orientation": "left_wall"
+		},
+		{
+			"found": true,
+			"grid": grid_pos + Vector2i(1, 0),
+			"normal": Vector2.LEFT,
+			"orientation": "right_wall"
+		},
+		{
+			"found": true,
+			"grid": grid_pos + Vector2i(0, -1),
+			"normal": Vector2.DOWN,
+			"orientation": "ceiling"
+		}
+	]
+
+	for candidate in candidates:
+		var orientation: String = candidate.get("orientation", "none")
+		if not _surface_is_valid_for_grip_direction(orientation, input_dir):
+			continue
+		if _is_solid_for_grip(candidate.get("grid", Vector2i.ZERO)):
+			return candidate
+
+	return {
+		"found": false,
+		"grid": Vector2i.ZERO,
+		"normal": Vector2.ZERO,
+		"orientation": "none"
+	}
 
 
 func _try_grip_corner_crawl(current_grid: Vector2i, input_direction: Vector2i) -> Dictionary:
@@ -386,7 +533,7 @@ func _try_grip_corner_crawl(current_grid: Vector2i, input_direction: Vector2i) -
 			continue
 		if not world.is_passable(candidate):
 			continue
-		var surface: Dictionary = _find_grip_surface_for_grid(candidate)
+		var surface: Dictionary = _find_grip_surface_for_grid_and_direction(candidate, input_direction)
 		if surface.get("found", false):
 			return {
 				"found": true,
@@ -447,11 +594,13 @@ func _find_best_grip_surface() -> Dictionary:
 		}
 	]
 	
-	# Collect valid candidates
+	# Collect valid candidates — VS009A Part 2K: exclude ceiling unless allowed
 	var valid_candidates: Array[Dictionary] = []
 	for candidate in candidates:
 		if _is_solid_for_grip(candidate["grid"]):
-			valid_candidates.append(candidate)
+			var orientation: String = candidate.get("orientation", "none")
+			if _orientation_allowed_for_base_grip(orientation):
+				valid_candidates.append(candidate)
 	
 	if valid_candidates.is_empty():
 		return {"found": false, "grid": Vector2i.ZERO, "normal": Vector2.ZERO, "orientation": "none"}
@@ -481,161 +630,126 @@ func _find_best_grip_surface() -> Dictionary:
 	return valid_candidates[0]
 
 
-func _handle_grip_movement(current_grid_pos: Vector2i, _horizontal_direction: Vector2, delta: float) -> bool:
+func _handle_grip_movement(_current_grid_pos: Vector2i, _horizontal_direction: Vector2, _delta: float) -> bool:
 	"""
-	Surface crawl movement while right-mouse grip is held.
-	The worm may move into any passable destination tile that is adjacent
-	to at least one solid grip surface. This allows crawling around corners
-	and across irregular terrain without requiring a perfect continuous wall.
+	Grid-locked step movement while right-mouse grip is held.
+	The worm moves in discrete grid steps toward validated target tile centers.
 	"""
-	# Terrain contact validation — anti-flying: grip only works while worm is
-	# in a passable tile adjacent to at least one solid grip surface.
+	# Step 1 — Validate Current Contact
 	var current_check: Vector2i = _get_current_grid_pos()
 	if not world.is_passable(current_check):
 		_release_grip()
+		is_grip_stepping = false
 		velocity = Vector2.ZERO
 		last_action = "Grip lost: inside solid terrain."
 		print("Grip lost: inside solid terrain at ", current_check)
 		return false
-	
-	var result: Dictionary = _find_best_grip_surface()
-	var grip_found: bool = result.get("found", false)
-	
-	# Only print grip-found line once per press to avoid spam
-	if not _grip_debug_printed:
-		print("_handle_grip_movement: found=%s, orientation=%s" % [grip_found, result.get("orientation", "none")])
-		_grip_debug_printed = true
-	
-	if not grip_found:
-		_release_grip()
-		last_action = "Grip lost: no adjacent terrain."
-		print("Grip lost: no adjacent terrain at ", current_check)
-		return false
-	
-	# Lock orientation on first grip frame — prevents flickering from mouse position changes
+
+	if not is_grip_stepping:
+		var current_surface: Dictionary = _find_grip_surface_for_grid(current_check)
+		if not current_surface.get("found", false):
+			_release_grip()
+			is_grip_stepping = false
+			velocity = Vector2.ZERO
+			last_action = "Grip lost: no adjacent terrain."
+			print("Grip lost: no adjacent terrain at (%d,%d)" % [current_check.x, current_check.y])
+			return false
+
+	# Ensure grip state is active (print once on first valid frame)
 	if not is_gripping:
-		grip_orientation = result.get("orientation", "none")
-		grip_target_grid = result.get("grid", Vector2i.ZERO)
-		grip_normal = result.get("normal", Vector2.ZERO)
-		last_action = "Gripping: %s" % grip_orientation
-	
-	is_gripping = true
-	
-	# Suspend gravity during grip
-	velocity.y = 0.0
-	
-	# Read directional input for surface crawl.
-	# Prioritize vertical input (W/S) over horizontal input (A/D) when both are pressed.
-	var grip_input := Vector2.ZERO
-	var input_up: bool = Input.is_action_pressed("move_up")
-	var input_down: bool = Input.is_action_pressed("move_down")
-	var input_left: bool = Input.is_action_pressed("move_left")
-	var input_right: bool = Input.is_action_pressed("move_right")
-	
-	if input_up:
-		grip_input.y = -1.0
-	elif input_down:
-		grip_input.y = 1.0
-	elif input_left:
-		grip_input.x = -1.0
-	elif input_right:
-		grip_input.x = 1.0
-	
-	if grip_input == Vector2.ZERO:
-		velocity.x = 0.0
-		velocity.y = 0.0
-		return true
-	
-	# Determine direction name for debug logging
-	var dir_name: String = "none"
-	if grip_input.y < 0.0:
-		dir_name = "up"
-	elif grip_input.y > 0.0:
-		dir_name = "down"
-	elif grip_input.x < 0.0:
-		dir_name = "left"
-	elif grip_input.x > 0.0:
-		dir_name = "right"
-	
-	# Calculate destination grid tile
-	var destination_grid: Vector2i = current_grid_pos + Vector2i(int(grip_input.x), int(grip_input.y))
-	
-	print("Grip move attempt: direction=%s, current=%s, dest=%s" % [dir_name, current_grid_pos, destination_grid])
-	
-	# Check 1: Destination must be passable (AIR or EMPTY)
-	if not world.is_passable(destination_grid):
-		velocity = Vector2.ZERO
-		print("Grip direct blocked: destination not passable at %s" % destination_grid)
-		print("Trying grip corner crawl...")
-		# Attempt corner crawl around the blocking tile
-		var corner_input: Vector2i = Vector2i(int(grip_input.x), int(grip_input.y))
-		var corner_result: Dictionary = _try_grip_corner_crawl(current_grid_pos, corner_input)
-		if corner_result.get("found", false):
-			var candidate: Vector2i = corner_result.get("destination", Vector2i.ZERO)
-			var surface: Dictionary = corner_result.get("surface", {})
-			var move_vector: Vector2 = Vector2(candidate.x - current_grid_pos.x, candidate.y - current_grid_pos.y).normalized()
-			var cc_intended: Vector2 = move_vector * GRIP_MOVE_SPEED
-			var cc_predicted_pos: Vector2 = global_position + cc_intended * delta
-			var cc_predicted_grid: Vector2i = world.world_to_grid(cc_predicted_pos)
-			# Terrain-aware check: predicted corner crawl path must not enter solid
-			if not world.is_passable(cc_predicted_grid):
-				print("Grip corner crawl failed: no safe terrain-aware candidate.")
-				last_action = "Grip blocked: no corner crawl available."
-				return true
-			if not _find_grip_surface_for_grid(cc_predicted_grid).get("found", false):
-				print("Grip corner crawl failed: no safe terrain-aware candidate.")
-				last_action = "Grip blocked: no corner crawl available."
-				return true
-			velocity = cc_intended
-			grip_orientation = surface.get("orientation", grip_orientation)
-			grip_normal = surface.get("normal", grip_normal)
-			grip_target_grid = surface.get("grid", grip_target_grid)
-			last_action = "Grip corner crawl: %s" % surface.get("orientation", "unknown")
-			print("Grip corner crawl: current=%s, candidate=%s, surface=%s" % [current_grid_pos, candidate, surface.get("orientation", "none")])
+		is_gripping = true
+
+	# Step 2 — Continue Existing Grip Step
+	if is_grip_stepping:
+		var to_target: Vector2 = grip_step_target_position - global_position
+
+		if to_target.length() <= 1.0:
+			# Arrived at target tile center
+			global_position = grip_step_target_position
+			velocity = Vector2.ZERO
+			is_grip_stepping = false
+
+			var arrival_surface: Dictionary = _find_grip_surface_for_grid_and_direction(grip_step_target_grid, grip_step_input_dir)
+			if not arrival_surface.get("found", false):
+				_release_grip()
+				last_action = "Grip lost: no directional contact after step."
+				print("Grip lost: no directional contact after step at (%d,%d), input=(%d,%d)" % [grip_step_target_grid.x, grip_step_target_grid.y, grip_step_input_dir.x, grip_step_input_dir.y])
+				return false
+
+			grip_orientation = arrival_surface.get("orientation", grip_orientation)
+			grip_normal = arrival_surface.get("normal", grip_normal)
+			grip_target_grid = arrival_surface.get("grid", grip_target_grid)
+			last_action = "Grip step complete: grid=(%d,%d), surface=%s" % [grip_step_target_grid.x, grip_step_target_grid.y, grip_orientation]
 			return true
 		else:
-			print("Grip corner crawl failed: no passable adjacent surface.")
-			last_action = "Grip blocked: no corner crawl available."
+			velocity = to_target.normalized() * GRIP_MOVE_SPEED
 			return true
-	
-	# Check 2: Destination must have at least one adjacent solid grip surface
-	var new_surface: Dictionary = _find_grip_surface_for_grid(destination_grid)
-	if not new_surface.get("found", false):
+
+	# Step 3 — Start New Grip Step From Input
+	# Priority: W/S first, then A/D (same priority as existing grip movement)
+	var input_dir := Vector2i.ZERO
+
+	if Input.is_action_pressed("move_up"):
+		input_dir = Vector2i(0, -1)
+	elif Input.is_action_pressed("move_down"):
+		input_dir = Vector2i(0, 1)
+	elif Input.is_action_pressed("move_left"):
+		input_dir = Vector2i(-1, 0)
+	elif Input.is_action_pressed("move_right"):
+		input_dir = Vector2i(1, 0)
+
+	if input_dir == Vector2i.ZERO:
 		velocity = Vector2.ZERO
-		print("Grip blocked: no adjacent surface at %s" % destination_grid)
-		last_action = "Grip blocked: no adjacent surface at %s" % destination_grid
+		# Suspended gravity during grip
 		return true
-	
-	# Predicted position check — anti-clipping: verify velocity does not push into solid
-	var intended_velocity: Vector2 = Vector2(grip_input.x, grip_input.y) * GRIP_MOVE_SPEED
-	var predicted_position: Vector2 = global_position + intended_velocity * delta
-	var predicted_grid: Vector2i = world.world_to_grid(predicted_position)
-	
-	if not world.is_passable(predicted_grid):
+
+	var target_grid: Vector2i = current_check + input_dir
+
+	# Check if target is passable
+	if not world.is_passable(target_grid):
+		# Try corner crawl — also grid-locked
+		var corner_result: Dictionary = _try_grip_corner_crawl(current_check, input_dir)
+		if corner_result.get("found", false):
+			var candidate: Vector2i = corner_result.get("destination", Vector2i.ZERO)
+			grip_step_target_grid = candidate
+			grip_step_target_position = world.grid_to_world_center(candidate)
+			is_grip_stepping = true
+			grip_step_input_dir = input_dir
+
+			var corner_surface: Dictionary = corner_result.get("surface", {})
+			grip_orientation = corner_surface.get("orientation", grip_orientation)
+			grip_normal = corner_surface.get("normal", grip_normal)
+			grip_target_grid = corner_surface.get("grid", grip_target_grid)
+
+			last_action = "Grip step (corner): %s" % grip_orientation
+			print("Grip step started: current=(%d,%d), target=(%d,%d), surface=%s, input=(%d,%d)" % [current_check.x, current_check.y, candidate.x, candidate.y, grip_orientation, input_dir.x, input_dir.y])
+			return true
+		else:
+			velocity = Vector2.ZERO
+			last_action = "Grip blocked: no safe step."
+			print("Grip blocked: no safe step from (%d,%d) input=(%d,%d)" % [current_check.x, current_check.y, input_dir.x, input_dir.y])
+			return true
+
+	# Target is passable — check for direction-compatible adjacent grip surface
+	var target_surface: Dictionary = _find_grip_surface_for_grid_and_direction(target_grid, input_dir)
+	if not target_surface.get("found", false):
 		velocity = Vector2.ZERO
-		print("Grip blocked: predicted solid terrain at ", predicted_grid)
-		last_action = "Grip blocked: predicted solid terrain."
+		last_action = "Grip blocked: no directional contact for input=(%d,%d) at target=(%d,%d)" % [input_dir.x, input_dir.y, target_grid.x, target_grid.y]
+		print("Grip blocked: no directional contact for input=(%d,%d) at target=(%d,%d)" % [input_dir.x, input_dir.y, target_grid.x, target_grid.y])
 		return true
-	
-	if not _find_grip_surface_for_grid(predicted_grid).get("found", false):
-		_release_grip()
-		velocity = Vector2.ZERO
-		print("Grip lost: no surface at predicted position ", predicted_grid)
-		last_action = "Grip lost: no surface at predicted position."
-		return false
-	
-	# Both checks passed — allow movement at grip speed
-	velocity = intended_velocity
-	
-	# Update grip state based on the new surface at the destination.
-	# This allows the worm to transition between surfaces (e.g. right_wall -> ceiling)
-	# without requiring a perfect continuous wall.
-	grip_orientation = new_surface.get("orientation", grip_orientation)
-	grip_normal = new_surface.get("normal", grip_normal)
-	grip_target_grid = new_surface.get("grid", grip_target_grid)
-	
-	print("Grip moving: %s, velocity=(%d,%d), new_surface=%s" % [dir_name, int(grip_input.x * GRIP_MOVE_SPEED), int(grip_input.y * GRIP_MOVE_SPEED), new_surface.get("orientation", "none")])
-	
+
+	# Start validated grip step toward target
+	grip_step_target_grid = target_grid
+	grip_step_target_position = world.grid_to_world_center(target_grid)
+	is_grip_stepping = true
+	grip_step_input_dir = input_dir
+
+	grip_orientation = target_surface.get("orientation", grip_orientation)
+	grip_normal = target_surface.get("normal", grip_normal)
+	grip_target_grid = target_surface.get("grid", grip_target_grid)
+
+	last_action = "Grip step: %s" % grip_orientation
+	print("Grip step started: current=(%d,%d), target=(%d,%d), surface=%s, input=(%d,%d)" % [current_check.x, current_check.y, target_grid.x, target_grid.y, grip_orientation, input_dir.x, input_dir.y])
 	return true
 
 
@@ -647,6 +761,8 @@ func _release_grip() -> void:
 	grip_normal = Vector2.ZERO
 	grip_orientation = "none"
 	grip_target_grid = Vector2i.ZERO
+	is_grip_stepping = false
+	grip_step_input_dir = Vector2i.ZERO
 
 
 # -------- End VS009A Part 2 --------
