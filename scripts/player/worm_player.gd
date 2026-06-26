@@ -66,8 +66,14 @@ var _grip_debug_printed: bool = false  # Prevent console spam: only print diagno
 var can_grip_ceiling: bool = false
 var _ceiling_grip_rejection_printed: bool = false  # One-time print per rejection event
 
+# Grip mid-air recovery capability — VS009A Part 2M
+# Future equipment/prototypes may allow emergency mid-air grip/recovery.
+# Base worm cannot re-grip while falling.
+var can_grip_while_falling: bool = false
+var grip_locked_until_landed: bool = false
+
 # Debug anchor visualization — VS009A Part 2J: visual-only debug overlay
-var show_anchor_debug: bool = true
+var show_anchor_debug: bool = false  # VS009A Part 2L: off by default; toggle for diagnostic overlay
 
 # Grip step state — VS009A Part 2H: Grid-locked step movement
 var is_grip_stepping: bool = false
@@ -208,19 +214,26 @@ func _physics_process(delta: float) -> void:
 		
 		# Right-mouse press/release edge detection diagnostics
 		if right_mouse_held and not _was_grip_input_down:
-			print("Right mouse grip input detected.")
-			last_action = "Right mouse grip input detected."
+			last_action = "Grip engaged."
 			_grip_debug_printed = false  # Reset for next press diagnostics
 			_ceiling_grip_rejection_printed = false  # Reset ceiling message for new grip attempt
 		if not right_mouse_held and _was_grip_input_down:
-			print("Right mouse grip input released.")
-			last_action = "Right mouse grip input released."
+			last_action = "Grip released."
 			is_grip_stepping = false
 		_was_grip_input_down = right_mouse_held
 		
 		var grip_active: bool = false
 		
-		if right_mouse_held:
+		# VS009A Part 2M: block grip during fall for base worm
+		var grip_blocked_by_fall: bool = (is_falling or grip_locked_until_landed) and not can_grip_while_falling
+		
+		if right_mouse_held and grip_blocked_by_fall:
+			if is_gripping or is_grip_stepping:
+				_release_grip()
+			is_grip_stepping = false
+			grip_active = false
+			last_action = "Cannot grip while falling."
+		elif right_mouse_held:
 			grip_active = _handle_grip_movement(current_grid_pos, horizontal_direction, delta)
 		
 		if not grip_active:
@@ -262,6 +275,11 @@ func _physics_process(delta: float) -> void:
 				if FALL_TRACKING_ENABLED and not is_falling:
 					is_falling = true
 					fall_start_grid_y = current_grid_pos.y
+					# VS009A Part 2M: lock out grip during fall for base worm
+					if not can_grip_while_falling:
+						grip_locked_until_landed = true
+						_release_grip()
+						is_grip_stepping = false
 				velocity.y += GRAVITY * delta
 				velocity.y = clamp(velocity.y, 0.0, MAX_FALL_SPEED)
 			else:
@@ -270,6 +288,8 @@ func _physics_process(delta: float) -> void:
 					_resolve_tracked_fall(fall_distance_tiles)
 					is_falling = false
 					fall_start_grid_y = current_grid_pos.y
+					# VS009A Part 2M: landing clears grip lockout
+					grip_locked_until_landed = false
 				if velocity.y > 0.0:
 					velocity.y = 0.0
 		
@@ -755,8 +775,6 @@ func _handle_grip_movement(_current_grid_pos: Vector2i, _horizontal_direction: V
 
 func _release_grip() -> void:
 	"""Clear grip state immediately. Gravity will resume naturally."""
-	if is_gripping:
-		print("_release_grip called — clearing grip state.")
 	is_gripping = false
 	grip_normal = Vector2.ZERO
 	grip_orientation = "none"
