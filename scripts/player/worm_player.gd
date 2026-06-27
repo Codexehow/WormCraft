@@ -60,6 +60,10 @@ var grip_target_grid: Vector2i = Vector2i.ZERO
 var _was_grip_input_down: bool = false  # Diagnostic: track right-mouse press edge
 var _grip_debug_printed: bool = false  # Prevent console spam: only print diagnostics once per press
 
+# VS010 Part 1: Silk Grip Pads MK0 prototype state
+# Part 2 will connect this to can_grip_ceiling behavior.
+var has_silk_grip_pads: bool = false
+
 # Grip capability flags — VS009A Part 2K
 # Future equipment/prototypes may enable ceiling grip.
 # Base worm cannot grip ceilings.
@@ -985,7 +989,7 @@ func _update_animation_surface_orientation() -> void:
 
 	if is_gripping:
 		match grip_orientation:
-			"floor", "left_wall", "right_wall":
+			"floor", "left_wall", "right_wall", "ceiling":
 				orientation_to_send = grip_orientation
 			_:
 				orientation_to_send = "floor"
@@ -1103,6 +1107,10 @@ func _on_place_dirt_input() -> void:
 func _on_interact_input() -> void:
 	"""
 	Handle interact input (R key). Scans/inspects the prop in front of the worm.
+	Priority order:
+	1. World props (spider silk scan)
+	2. Workshop props (wall_hooks prototype build)
+	3. Nothing to inspect
 	"""
 	print("Interact pressed.")
 	if not is_alive or not world:
@@ -1126,7 +1134,65 @@ func _on_interact_input() -> void:
 		if effect_pos != Vector2.ZERO:
 			world._spawn_scan_particles_at(effect_pos)
 
+		print(result["message"])
+		return
+
+	# Step 2: If no world prop was found ("Nothing to inspect."), try workshop prop interaction
+	if result["message"] == "Nothing to inspect.":
+		if _try_interact_workshop_prop(target_grid_pos):
+			print(last_action)
+			return
+
+	# Step 3: No interaction found — preserve existing out-of-range message
 	print(result["message"])
+
+
+func _try_interact_workshop_prop(target_grid_pos: Vector2i) -> bool:
+	"""Try to interact with the wall_hooks workshop prop. Returns true if handled."""
+	if not world:
+		return false
+	
+	# Use the worm's current grid position as the primary proximity check.
+	# wall_hooks is on the wall above the workshop floor, so the target position
+	# (in front of the worm) may not align with the prop tile itself.
+	var worm_grid_pos: Vector2i = world.world_to_grid(global_position)
+	
+	# Check proximity to wall_hooks workshop prop (generous radius so it's
+	# reachable from anywhere in the workshop pocket, which spans ~11x7 tiles).
+	if not world.is_near_workshop_prop(worm_grid_pos, "wall_hooks", 8):
+		# Also try the target position as fallback for when the worm is closer
+		if not world.is_near_workshop_prop(target_grid_pos, "wall_hooks", 2):
+			return false
+	
+	return _try_build_silk_grip_pads()
+
+
+func _try_build_silk_grip_pads() -> bool:
+	"""Attempt to build Silk Grip Pads MK0 at the workshop wall_hooks.
+	
+	Build conditions:
+	- Spider silk sample must be in inventory.
+	- Prototype must not already be built.
+	
+	Returns true (handled) regardless of success or failure — prevents fallthrough
+	to "Nothing to inspect."
+	"""
+	if has_silk_grip_pads:
+		last_action = "Silk Grip Pads MK0 already equipped."
+		emit_signal("inventory_changed", inventory)
+		return true
+	
+	if inventory.get("spider_silk_sample", 0) <= 0:
+		last_action = "Prototype blocked: spider silk sample required."
+		emit_signal("inventory_changed", inventory)
+		return true
+	
+	has_silk_grip_pads = true
+	can_grip_ceiling = true  # VS010 Part 2: Enable ceiling grip capability
+	last_action = "Built Silk Grip Pads MK0. Ceiling grip enabled."
+	emit_signal("inventory_changed", inventory)
+	print("Silk Grip Pads MK0 prototype built.")
+	return true
 
 
 func _on_eat_food_input() -> void:
@@ -1258,6 +1324,13 @@ func get_inventory_capacity(item_id: String) -> int:
 
 func get_last_fall_distance_tiles() -> int:
 	return last_fall_distance_tiles
+
+
+func get_prototype_status() -> String:
+	"""Return the prototype equipment status for UI display."""
+	if has_silk_grip_pads:
+		return "Silk Grip Pads MK0"
+	return "None"
 
 
 func get_dig_target_grid_pos() -> Vector2i:

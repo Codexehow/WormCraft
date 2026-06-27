@@ -12,7 +12,7 @@ func _ready() -> void:
 	
 	# Create panel
 	panel_container = PanelContainer.new()
-	panel_container.size = Vector2(320, 280)
+	panel_container.size = Vector2(320, 300)
 	panel_container.position = Vector2(-340, 10)  # Start off-screen to the left
 	
 	# Create stylebox for panel
@@ -78,6 +78,9 @@ func _update_panel() -> void:
 	var dirt_pile: int = worm_player.get_inventory_count("dirt_pile")
 	var dirt_capacity: int = worm_player.get_inventory_capacity("dirt_pile")
 	var spider_silk: int = worm_player.get_inventory_count("spider_silk_sample")
+	var prototype_text: String = "None"
+	if worm_player.has_method("get_prototype_status"):
+		prototype_text = worm_player.get_prototype_status()
 	var last_fall: int = 0
 	if worm_player.has_method("get_last_fall_distance_tiles"):
 		last_fall = worm_player.get_last_fall_distance_tiles()
@@ -91,9 +94,10 @@ Facing: %s
 Dirt Dug: %d
 Dirt Pile: %d / %d
 Spider Silk Sample: %d
+Prototype: %s
 Last Fall: %d tiles
 Last: %s
-""" % [hunger_text, status_text, tile_type_text, facing_text, worm_player.dirt_dug_count, dirt_pile, dirt_capacity, spider_silk, last_fall, worm_player.last_action]
+""" % [hunger_text, status_text, tile_type_text, facing_text, worm_player.dirt_dug_count, dirt_pile, dirt_capacity, spider_silk, prototype_text, last_fall, worm_player.last_action]
 	
 	label.text = panel_text
 	

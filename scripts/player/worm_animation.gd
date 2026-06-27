@@ -55,6 +55,9 @@ var right_wall_sprite_offset: Vector2:
 # Floor rotation
 const FLOOR_ROTATION: float = 0.0
 
+# Ceiling rotation — flip upside down (180°)
+const CEILING_ROTATION: float = PI
+
 # Wall visual head state helpers — VS009A Part 3F
 const WALL_HEAD_UP := "head_up"
 const WALL_HEAD_DOWN := "head_down"
@@ -111,6 +114,7 @@ func update_texture() -> void:
 	
 	# VS009A Part 3F: When wall-gripping, texture is owned by _apply_surface_visuals().
 	# Do not overwrite the wall preset texture with floor-facing logic.
+	# Ceiling uses floor-style facing-based textures, not wall-style locked textures.
 	if surface_orientation == "left_wall" or surface_orientation == "right_wall":
 		return
 	
@@ -216,7 +220,7 @@ func set_surface_orientation(new_orientation: String) -> void:
 	Unknown orientations fall back to 'none'."""
 	var resolved_orientation: String = new_orientation
 	match new_orientation:
-		"floor", "left_wall", "right_wall", "none":
+		"floor", "left_wall", "right_wall", "ceiling", "none":
 			resolved_orientation = new_orientation
 		_:
 			resolved_orientation = "none"
@@ -265,6 +269,16 @@ func _apply_right_wall_visuals() -> void:
 	sprite.modulate = Color.WHITE
 
 
+func _apply_ceiling_visuals() -> void:
+	"""Ceiling visuals: face direction determines texture, rotate 180° upside down.
+	Uses the same facing-based texture logic as floor but with upside-down rotation.
+	Offset uses the floor/ceiling default offset with no wall-specific tuning needed."""
+	sprite.rotation = CEILING_ROTATION
+	sprite.offset = floor_sprite_offset
+	sprite.modulate = Color.WHITE
+	# Ceiling texture is handled by update_texture() based on current_facing, same as floor.
+
+
 func _apply_surface_visuals() -> void:
 	"""Apply the sprite offset and rotation preset for the current surface_orientation.
 	Floor uses floor preset. Wall uses explicit per-case presets that set texture, rotation, and offset.
@@ -279,6 +293,8 @@ func _apply_surface_visuals() -> void:
 			_apply_left_wall_visuals()
 		"right_wall":
 			_apply_right_wall_visuals()
+		"ceiling":
+			_apply_ceiling_visuals()
 		_:
 			_apply_floor_visuals()
 

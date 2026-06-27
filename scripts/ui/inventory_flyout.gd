@@ -12,7 +12,7 @@ func _ready() -> void:
 	
 	# Create panel
 	panel_container = PanelContainer.new()
-	panel_container.size = Vector2(280, 150)
+	panel_container.size = Vector2(280, 170)
 	panel_container.position = Vector2(-300, 10)  # Start off-screen to the right
 	
 	# Create stylebox for panel
@@ -71,13 +71,19 @@ func _update_panel() -> void:
 	var dirt_pile: int = worm_player.get_inventory_count("dirt_pile")
 	var dirt_capacity: int = worm_player.get_inventory_capacity("dirt_pile")
 	var spider_silk: int = worm_player.get_inventory_count("spider_silk_sample")
+	var prototype_text: String = "Not Built"
+	if worm_player.has_method("get_prototype_status"):
+		var proto_status: String = worm_player.get_prototype_status()
+		if proto_status != "None":
+			prototype_text = "Built"
 	
 	var panel_text: String = """INVENTORY
 
 Quantum Space Folder
 Dirt Pile: %d / %d
 Spider Silk Sample: %d
-""" % [dirt_pile, dirt_capacity, spider_silk]
+Silk Grip Pads MK0: %s
+""" % [dirt_pile, dirt_capacity, spider_silk, prototype_text]
 	
 	label.text = panel_text
 	

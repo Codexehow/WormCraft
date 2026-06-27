@@ -823,6 +823,17 @@ func try_interact_prop_near(center_pos: Vector2i, radius: int = 1) -> Dictionary
 	return exact_result
 
 
+func is_near_workshop_prop(grid_pos: Vector2i, prop_id: String, radius: int = 2) -> bool:
+	"""Check if the given grid position is within Manhattan distance <= radius of the specified workshop prop."""
+	for prop in workshop_props:
+		if prop["id"] != prop_id:
+			continue
+		var prop_grid_pos: Vector2i = prop["grid_pos"]
+		var distance: int = abs(grid_pos.x - prop_grid_pos.x) + abs(grid_pos.y - prop_grid_pos.y)
+		return distance <= radius
+	return false
+
+
 func _spawn_scan_particles_at(world_pos: Vector2) -> void:
 	"""Spawn a short one-shot particle burst at the given world position for scan feedback."""
 	var particles := CPUParticles2D.new()
