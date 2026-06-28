@@ -1057,6 +1057,11 @@ func _on_dig_input() -> void:
 	if not is_alive or not world:
 		return
 	
+	# Play dig SFX — uses dedicated SFX player pool, never touches MusicPlayer.
+	var sc: Node = get_tree().root.get_node_or_null("SoundController")
+	if sc != null and sc.has_method("play_sfx"):
+		sc.play_sfx("dig")
+	
 	var target_grid_pos: Vector2i = _get_dig_target_grid_pos()
 	var result: Dictionary = world.try_dig_tile(target_grid_pos)
 	last_action = result["message"]

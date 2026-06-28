@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://dg1xkag3edr5m"]
+
+[ext_resource type="Script" path="res://scripts/ui/deep_grub_grooves_flyout.gd" id="1_5hq2p"]
+
+[node name="DeepGrubGroovesFlyout" type="CanvasLayer"]
+script = ExtResource("1_5hq2p")

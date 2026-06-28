@@ -6,6 +6,7 @@
 [ext_resource type="PackedScene" uid="uid://b5s8d23g85bg0" path="res://scenes/ui/InventoryFlyout.tscn" id="4_rz7f1"]
 [ext_resource type="Script" uid="uid://estfceeaqlj2" path="res://scripts/main.gd" id="5_1h1y3"]
 [ext_resource type="PackedScene" uid="uid://bpvd5sfi0kqfq" path="res://scenes/ui/DeathScreen.tscn" id="6_7d1e3"]
+[ext_resource type="PackedScene" uid="uid://dg1xkag3edr5m" path="res://scenes/ui/DeepGrubGroovesFlyout.tscn" id="7_2s8hq"]
 
 [node name="Main" type="Node2D" unique_id=365807381]
 script = ExtResource("5_1h1y3")
@@ -23,3 +24,5 @@ zoom = Vector2(2, 2)
 [node name="InventoryFlyout" parent="." unique_id=791831539 instance=ExtResource("4_rz7f1")]
 
 [node name="DeathScreen" parent="." unique_id=11223344 instance=ExtResource("6_7d1e3")]
+
+[node name="DeepGrubGroovesFlyout" parent="." unique_id=416403148 instance=ExtResource("7_2s8hq")]
